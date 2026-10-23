@@ -14,4 +14,4 @@
 
 **Known limits:** No automated browser-level test yet. This block has no live-update stream, autonomous engine, game mechanics, run lifecycle, API provider, or history replay; those remain assigned to later blocks. The demo posts are sample persisted records, not AI output.
 
-**Next block:** Block 2 — shared autonomous demo engine, role/privacy boundaries, controls, persisted decisions and live updates.
+**Next block:** Block 2 — shared autonomous demo engine, role/privacy boundaries, controls, persisted decisions and live updates. Copy-ready session prompt: `docs/AI_HANDOFF.md`.
