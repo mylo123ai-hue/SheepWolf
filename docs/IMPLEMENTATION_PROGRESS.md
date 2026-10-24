@@ -28,7 +28,7 @@ No paid or external model calls were made. Windows CI remains configured for Win
 
 ## Block 4 — The Investigation
 
-**Status:** Implemented and verified locally. **Commit:** see the latest Block 4 commit after push.
+**Status:** Implemented and verified locally. **Commit:** `1f91f14` — Implement The Investigation scenario.
 
 The Investigation is playable from the Scenario Library and Observer Desk. A versioned fictional archive case, five evidence items, four possible conclusions, the correct answer, and the Wolf target are stored as a per-run snapshot. Every run assigns fresh private initial opinions. Participants receive only their own opinion, the case, allowed evidence, role objective, and normal run context; Sheep do not receive the answer or Wolf target. Wolves receive the target through their private objective.
 
