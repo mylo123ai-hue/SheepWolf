@@ -63,6 +63,30 @@ describe('real AI experiment engine path',()=>{
     expect((db.prepare("SELECT count(*) AS n FROM provider_requests WHERE experiment_id=? AND status='budget_rejected'").get(run.id) as {n:number}).n).toBe(1);
   });
 
+  it.each([
+    {status:500,scenarioId:'capture-the-flags'},
+    {status:503,scenarioId:'capture-the-flags'},
+    {status:500,scenarioId:'the-investigation'},
+    {status:503,scenarioId:'the-investigation'}
+  ])('fails HTTP $status for $scenarioId after bounded retries without persisting a partial game action',async({status,scenarioId})=>{
+    const fetcher=vi.fn<typeof fetch>(async()=>new Response('mock upstream failure details',{status}));const provider=await providerWith(fetcher);
+    const {db,engine,run}=setup(provider,baseLimits,scenarioId);engine.pause(run.id);
+    const result=await engine.step(run.id);
+    expect(fetcher).toHaveBeenCalledTimes(2);expect(result).toMatchObject({status:'failed',decisionCount:0,outcome:null});
+    expect(engine.getForumRows(run.id)).toHaveLength(0);
+    expect((db.prepare('SELECT count(*) AS n FROM agent_decisions WHERE experiment_id=?').get(run.id) as {n:number}).n).toBe(0);
+    const actions=db.prepare(`SELECT count(*) AS n FROM experiment_events WHERE experiment_id=? AND event_type IN ('forum.post','forum.reply','flag.transferred','flag.captured','investigation.opinion_changed','investigation.vote_recorded')`).get(run.id) as {n:number};
+    expect(actions.n).toBe(0);
+    if(scenarioId==='capture-the-flags'){
+      expect(engine.getCaptureTheFlagsState(run.id)).toMatchObject({safeCount:5,capturedCount:0,transfers:[]});
+    }else{
+      expect(engine.getInvestigationState(run.id)).toMatchObject({votes:[],opinionChanges:[],phase:'discussion'});
+    }
+    const requestRows=db.prepare('SELECT status,error_code FROM provider_requests WHERE experiment_id=? ORDER BY created_at,id').all(run.id) as {status:string;error_code:string}[];
+    expect(requestRows).toHaveLength(2);expect(requestRows.every(row=>row.status==='failed'&&row.error_code==='provider_unavailable')).toBe(true);
+    expect(result.stopReason).not.toContain('mock upstream failure details');
+  });
+
   it('cancels an in-flight decision on pause so a late completion cannot commit',async()=>{
     let started!:()=>void;const pending=new Promise<void>(resolve=>{started=resolve;});
     const fetcher:typeof fetch=async(_input,init)=>new Promise((_resolve,reject)=>{init?.signal?.addEventListener('abort',()=>reject(new Error('cancelled')),{once:true});started();});

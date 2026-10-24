@@ -65,6 +65,15 @@ describe('DeepSeek provider adapter (mock transport only)',()=>{
     expect(fetcher).toHaveBeenCalledTimes(2);expect(reserved).toHaveLength(2);expect(settled).toHaveLength(2);expect(settled.every(item=>item.errorCode==='rate_limit')).toBe(true);
   });
 
+  it.each([500,503])('retries HTTP %i once, settles both attempts and returns only a safe provider error',async(status)=>{
+    const {context}=fixture();const apiKey=await vault();const fetcher=vi.fn<typeof fetch>(async()=>new Response('upstream details must not escape',{status}));
+    const provider=new DeepSeekDecisionProvider({vault:apiKey,settings:{realModeEnabled:()=>true},fetcher});const reserved:ProviderRequestEstimate[]=[];const settled:ProviderRequestResult[]=[];
+    let failure:unknown;try{await provider.decide(context,execution({},reserved,settled));}catch(error){failure=error;}
+    expect(failure).toMatchObject({code:'provider_unavailable'});expect(String(failure)).not.toContain('upstream details');
+    expect(fetcher).toHaveBeenCalledTimes(2);expect(reserved).toHaveLength(2);expect(settled).toHaveLength(2);
+    expect(settled.every(item=>item.status==='failed'&&item.errorCode==='provider_unavailable')).toBe(true);
+  });
+
   it('stops after a bounded retry on timeout and exposes no transport error text',async()=>{
     const {context}=fixture();const apiKey=await vault();const fetcher=vi.fn<typeof fetch>((_input,init)=>new Promise((_resolve,reject)=>init?.signal?.addEventListener('abort',()=>reject(new Error('private request key sk-test-not-a-real-key')),{once:true})));
     const provider=new DeepSeekDecisionProvider({vault:apiKey,settings:{realModeEnabled:()=>true},fetcher,timeoutMs:8});const settled:ProviderRequestResult[]=[];
