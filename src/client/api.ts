@@ -1,4 +1,10 @@
 import type { Character, ExperimentSnapshot, ForumPost, ProviderRunLimits, PublicExperimentSnapshot, ScenarioSummary } from '../shared/types';
+export interface HistoryEvent {id:number;experimentId:string;sequence:number;type:string;payload:Record<string,unknown>;createdAt:string;audience:'public'|'observer'|'selected';visibleTo:string[];}
+export interface HistorySummary {snapshot:ExperimentSnapshot;eventCount:number;}
+export interface HistoryDetail extends HistorySummary {
+  events:HistoryEvent[];forum:ForumPost[];
+  decisions:{sequence:number;characterId:string;actionType:string;createdAt:string;result:unknown}[];
+}
 const request = async <T,>(url: string, init?: RequestInit): Promise<T> => {
   const headers = new Headers(init?.headers);
   if (init?.body !== undefined && !headers.has('content-type')) headers.set('content-type', 'application/json');
@@ -14,6 +20,8 @@ export const api = {
   experimentForum: (id:string) => request<ForumPost[]>(`/api/experiments/${id}/forum`),
   currentExperiment: () => request<ExperimentSnapshot|null>('/api/experiments/current'),
   experiment: (id:string) => request<ExperimentSnapshot>(`/api/experiments/${id}`),
+  history:()=>request<HistorySummary[]>('/api/history'),
+  historyRun:(id:string)=>request<HistoryDetail>(`/api/history/${encodeURIComponent(id)}`),
   publicExperiment: (id:string) => request<PublicExperimentSnapshot>(`/api/experiments/${id}/public`),
   startExperiment: (input:{scenarioId:string;paceMs:number;maxDurationMs:number;maxDecisions:number;mode:'demo'|'real'}) => request<ExperimentSnapshot>('/api/experiments',{method:'POST',body:JSON.stringify(input)}),
   controlExperiment: (id:string,control:'pause'|'resume'|'step'|'stop') => request<ExperimentSnapshot>(`/api/experiments/${id}/${control}`,{method:'POST'}),

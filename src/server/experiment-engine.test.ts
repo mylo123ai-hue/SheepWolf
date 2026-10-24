@@ -36,7 +36,7 @@ describe('shared autonomous experiment engine',()=>{
     const {engine}=fixture({provider});const run=engine.createExperiment({scenarioId,seed:'persist'});engine.pause(run.id);
     const afterOne=await engine.step(run.id);expect(afterOne.status).toBe('paused');expect(afterOne.decisionCount).toBe(1);expect(afterOne.postCount).toBe(1);
     expect(engine.getExperiment(run.id).decisionCount).toBe(1);
-    const afterTwo=await engine.step(run.id);expect(afterTwo.decisionCount).toBe(2);expect(afterTwo.postCount).toBe(2);expect(afterTwo.replyCount).toBe(1);
+    const afterTwo=await engine.step(run.id);expect(afterTwo.decisionCount).toBe(2);expect(afterTwo.postCount).toBe(1);expect(afterTwo.replyCount).toBe(1);
     const rows=engine.getForumRows(run.id);expect(rows.map(row=>row.body)).toContain('Let us take this one point at a time.');expect(rows.find(row=>row.body.startsWith('That helps'))?.parent_id).toBe(rows[0]?.id);
   });
   it('pauses without charging paused time, resumes, and stops without declaring a victory',async()=>{
@@ -218,6 +218,7 @@ describe('The Investigation scenario',()=>{
     const result=await runToVerdict({db,engine},seed,verdicts);expect(result.run).toMatchObject({status:'completed',outcome:{kind:'victory',team:'sheep',correctCount:5,votesCast:5}});
     expect(result.run.scenarioState).toMatchObject({kind:'the-investigation',phase:'completed',missingSheepVotes:[]});expect(db.prepare("SELECT count(*) AS n FROM investigation_votes v JOIN experiment_participants p ON p.experiment_id=v.experiment_id AND p.character_id=v.character_id WHERE v.experiment_id=? AND p.role='sheep'").get(result.run.id)).toMatchObject({n:5});
     const eventSequences=result.engine.getEvents(result.run.id).map(e=>e.sequence);expect(eventSequences).toEqual([...eventSequences].sort((a,b)=>a-b));
+    expect(result.engine.getEvents(result.run.id).at(-1)?.type).toBe('run.completed');
     expect(result.engine.getEvents(result.run.id,0,false).some(e=>e.type==='investigation.vote_recorded')).toBe(false);
   });
 

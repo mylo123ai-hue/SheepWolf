@@ -1,8 +1,8 @@
-# AI handoff — Sheep vs Wolf Block 6
+# AI handoff — Sheep vs Wolf Block 6 (completed)
 
 ## Assignment: Product Polish and Release
 
-This is the next engineering assignment. **Do not begin Block 6 until the owner explicitly authorizes it.** At the start of that block, inspect the current branch and PR/review state, `AGENTS.md`, `docs/PRODUCT_SPEC.md`, this handoff, and `docs/IMPLEMENTATION_PROGRESS.md`. Preserve Blocks 1–5 and continue from their latest verified merged state.
+This assignment was owner-authorized and executed for SW-B06. The original owner handoff and criterion-by-criterion evidence are in `codex/handoffs/SW-B06.md` and `codex/results/SW-B06.md`. Do not repeat Block 6; any further implementation needs a separate owner assignment. See `docs/IMPLEMENTATION_PROGRESS.md` for verified status and remaining platform checks.
 
 ### Goal
 
@@ -33,7 +33,8 @@ Prepare a reviewable branch/PR if requested by the owner. Do not merge, deploy, 
 
 ### Current verified continuity
 
-- Blocks 1–4: see `docs/IMPLEMENTATION_PROGRESS.md` and Git history.
-- Block 5 implementation: PR and commit references are recorded there after submission.
+- Blocks 1–5: see `docs/IMPLEMENTATION_PROGRESS.md` and Git history.
+- Block 6 status, PR and CI results: see `codex/results/SW-B06.md`.
 - The Block 5 signed-off scope remains unchanged at `docs/handoffs/BLOCK_05_REAL_AI_SETTINGS.md`.
-- No real DeepSeek request has been made. Real provider behavior has only been exercised using mocked transport.
+- No real DeepSeek request was made. Real provider behavior was exercised only with mocked transport.
+- Windows Server CI is not direct Windows 10 verification. Follow the remaining limitations in the Block 6 results report.

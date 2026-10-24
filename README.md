@@ -4,7 +4,7 @@ Sheep vs Wolf is a local-first browser simulation with seven recurring AI partic
 
 ## Run locally
 
-Requirements: 64-bit Windows 10 (or a recent macOS/Linux development machine), Node.js 20.18–24.x, npm and a current browser. Install Node.js once from [nodejs.org](https://nodejs.org/). On Windows, **Start SheepWolf.bat** starts the local development app and opens the browser. The app binds its API and Vite server to loopback addresses only.
+Requirements: 64-bit Windows 10 (or a recent macOS/Linux development machine), Node.js 20.18–24.x, npm and a current browser. Install 64-bit Node.js once from [nodejs.org](https://nodejs.org/). On Windows, **Start SheepWolf.bat** checks the Node version, installs the locked dependencies on first launch, starts the development servers, waits for both local services, then opens the default browser. It detects an already-running copy to avoid starting a duplicate. The server window stays open; press **Ctrl+C** there to stop the app. The app binds its API and Vite server to loopback addresses only. The launcher requires Node.js and is not a standalone Windows executable.
 
 For a terminal start:
 
@@ -23,7 +23,11 @@ npm run build
 npm test
 ```
 
-The SQLite database is stored under `%APPDATA%\SheepWolf\sheepwolf.sqlite` on Windows and `~/.sheepwolf/sheepwolf.sqlite` on macOS/Linux. Set `SHEEPWOLF_DATA_DIR` to choose another directory. Existing application data is not used for provider credentials.
+The SQLite database is stored under `%APPDATA%\SheepWolf\sheepwolf.sqlite` on Windows and `~/.sheepwolf/sheepwolf.sqlite` on macOS/Linux. Set `SHEEPWOLF_DATA_DIR` to choose another directory. In PowerShell, set it for the current session with `$env:SHEEPWOLF_DATA_DIR = 'D:\SheepWolf Data'` before starting the launcher from that PowerShell window, or set a persistent user value with `[Environment]::SetEnvironmentVariable('SHEEPWOLF_DATA_DIR', 'D:\SheepWolf Data', 'User')` and restart the launcher. Paths containing spaces are supported. Existing application data is not used for provider credentials.
+
+### Backup and recovery
+
+Stop Sheep vs Wolf with **Ctrl+C** in its server window before copying or restoring its database. Copy the complete app-data directory (the default Windows directory is `%APPDATA%\SheepWolf`) to a separate backup location. To restore, stop the app and copy the saved directory back to the configured data directory. Keep the SQLite database and its same-directory files together; do not copy a database while the server is writing it. If startup reports that only one local service is ready, close the existing server window and retry. If a port is in use, stop the other local SheepWolf process before starting again. The launcher does not kill arbitrary processes.
 
 ## Demo and real AI modes
 
@@ -39,6 +43,7 @@ Saving a key does not enable model requests. Enable **Real AI for runs** in Sett
 
 - Capture the Flags and The Investigation run through the shared autonomous engine, with scenario-specific validation and observer state.
 - Real DeepSeek requests are opt-in and bounded; roles, objectives and scenario details are assembled from each participant's server-filtered context.
-- Experiment history/replay and final release polish remain Block 6 work.
-- GitHub Actions checks on Windows Server 2022 / Node 22 verify clean installation, typecheck, build, tests and the OS credential-store adapter. This is not direct Windows 10 verification. The current Cloud Codex environment is Linux, so Windows 10 itself was not directly run here.
+- Experiment History preserves run configuration, role and profile snapshots, discussion, ordered events, scenario state, model usage, outcomes and stop/failure reasons. Its replay view walks saved events without calling a provider or changing the run.
+- The Windows launcher checks the supported Node.js range, waits for loopback API/frontend readiness, opens the app only when available, and reports startup failures without killing unrelated services.
+- GitHub Actions on Windows Server 2022 / Node 22 run the protected-key Settings flow in headless Chromium against a unique disposable Windows Credential Manager entry, then run the batch launcher from a clean path containing spaces and verify loopback binding, duplicate-launch reuse and SQLite recovery. The browser test forbids provider traffic and checks for key leaks. This verifies Windows Server 2022, not Windows 10 itself; Windows 10 was not directly run in this work block.
 - Live provider behavior has not been verified because development and CI use mocked transport only. A live connection test requires a configured key and an administrator's direct action.

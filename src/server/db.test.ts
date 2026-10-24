@@ -10,7 +10,7 @@ afterEach(() => { for (const db of databases.splice(0)) db.close(); for (const d
 describe('SQLite foundation', () => {
   it('migrates the schema and seeds seven characters and sample forum content once', () => {
     const db = openDatabase(':memory:'); databases.push(db);
-    expect((db.prepare('SELECT count(*) as n FROM schema_migrations').get() as {n:number}).n).toBe(5);
+    expect((db.prepare('SELECT count(*) as n FROM schema_migrations').get() as {n:number}).n).toBe(6);
     expect((db.prepare('SELECT count(*) as n FROM characters').get() as {n:number}).n).toBe(7);
     expect((db.prepare('SELECT count(*) as n FROM forum_posts').get() as {n:number}).n).toBe(4);
   });
