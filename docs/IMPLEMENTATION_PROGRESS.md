@@ -10,7 +10,7 @@
 
 ## Block 2 — Autonomous agents and live forum
 
-**Status:** Implemented and verified locally; committed with this progress update.
+**Status:** Implemented and verified locally.
 
 **Implemented:** A shared SQLite-backed scheduler creates runs with exactly five Sheep and two Wolves from independently recorded per-run role seeds. Stable character identities are reused with fresh per-run memory. Agent context contains only that participant's objective and permitted knowledge; Wolves know their teammate, while Sheep do not. The simulated provider generates varied posts, replies, silence, ending proposals, and votes without external services. The engine persists decisions, memory updates, run-scoped forum messages, lifecycle changes, and ordered events transactionally. Round-robin fairness among participants with the fewest opportunities avoids a fixed character order. Duration and decision caps, two-opportunity minimum, three-Sheep ending agreement, pause-aware active time, and interruption recovery are enforced. Observer controls and role details, current-run refresh, forum discussion, activity stream, and SSE-driven UI updates use real experiment state. Empty lifecycle requests no longer carry an invalid JSON content type.
 
@@ -18,6 +18,6 @@
 
 **Known limits:** The two listed scenarios still use the shared Block 2 discussion/ending lifecycle only. Capture the Flags actions/scoring and The Investigation actions/scoring are not implemented in this block. Real model providers, history/replay, and direct Windows 10 runtime verification remain outstanding. CI is configured for Windows Server 2022 with Node 22; this environment did not provide Windows for direct testing.
 
-**Commit:** To be recorded after the Block 2 commit is created.
+**Commit:** `7100e3e` — Implement autonomous demo engine and live forum.
 
 **Next block:** Block 3 — playable Capture the Flags mechanics. Assignment: `docs/AI_HANDOFF.md`.
