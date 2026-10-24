@@ -14,11 +14,11 @@ The shared engine assigns five Sheep and two Wolves per run, maintains fresh par
 
 ## Block 3 — Capture the Flags
 
-**Status:** Implemented and verified locally. **Commit:** see the current Block 3 commit after merge/push.
+**Status:** Implemented and verified locally. **Commit:** `f27e68c` — Implement Capture the Flags scenario.
 
 Five stable per-run flags begin with the five Sheep. The server validates explicit custodian-authorized transfers, persists accepted transfers atomically with ordered events and decisions, prevents duplicate/repeated captures, and permanently captures a flag received by a Wolf. Three distinct captures immediately win for Wolves. A valid consensus or execution-limit conclusion scores Sheep only when at least three flags remain safe; stop/failure remains unscored. Transfer events are observer-visible and selectively participant-visible, while participant views and public events omit privileged flag/role state. Restart recovery preserves flag and transfer state.
 
-The Observer Desk displays live ownership, safe/captured totals, transfer history, and captured-flag victory progress. Capture the Flags is selectable; The Investigation is marked planned. The no-cost simulation uses the same engine and persisted forum/action records.
+The Observer Desk displays live ownership, safe/captured totals, transfer history, and captured-flag victory progress. Capture the Flags is selectable; The Investigation is marked planned. The no-cost simulation uses the same engine and persisted forum/action records. Browser screenshots: `docs/screenshots/scenario-library.png`, `docs/screenshots/capture-the-flags-live-forum.png`, `docs/screenshots/observer-flags.png`, `docs/screenshots/completed-game-outcome.png`, and `docs/screenshots/mobile-live-forum.png`.
 
 **Verification:** `npm ci`, `npm run typecheck`, `npm run build`, and `npm test` passed (22 tests across 3 test files). Automated coverage includes inventory, role and context privacy, safe and Wolf transfers, invalid custody/target cases, captured flag immutability, Wolf victory, valid Sheep outcomes, stopped runs, persistence/recovery, and provider-driven demo behavior. A headless Chromium walkthrough used the actual UI and HTTP API: started a Capture the Flags run, observed live forum and Observer Desk updates, completed 43 persisted decisions and 40 forum rows, and verified the completed Sheep victory displayed five safe flags. The SQLite database contained five flags, one persisted voluntary transfer (Clover → Ash), 43 decisions, and 88 ordered experiment events. Public events excluded private transfer details; observer events included them. Screenshots are saved under `docs/screenshots/`.
 
