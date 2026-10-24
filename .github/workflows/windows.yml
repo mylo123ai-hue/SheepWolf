@@ -46,7 +46,7 @@ jobs:
             throw 'Windows launcher did not make both loopback services ready within 120 seconds.'
           }
           function Stop-AppTree($Process) {
-            if (-not $Process.HasExited) { try { & taskkill.exe /PID $Process.Id /T /F 2>$null | Out-Null } catch { }; $Process.WaitForExit(10000) | Out-Null }
+            if (-not $Process.HasExited) { try { & taskkill.exe /PID $Process.Id /T /F 2>$null | Out-Null } catch { }; $global:LASTEXITCODE = 0; $Process.WaitForExit(10000) | Out-Null }
           }
           $launcher = Start-AppLauncher
           try {
