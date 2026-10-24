@@ -19,7 +19,7 @@
     "demo:build": "node scripts/build-demo.mjs",
     "demo:browser-test": "node scripts/demo-browser-smoke.mjs",
     "check:readme": "node scripts/check-readme-links.mjs",
-    "demo:serve": "vite preview --config demo/vite.config.ts --host 127.0.0.1 --port 4174 --strictPort"
+    "demo:serve": "node scripts/serve-demo.mjs"
   },
   "dependencies": {
     "@fastify/cors": "^10.0.2",

@@ -43,7 +43,7 @@ To serve the root static build locally after building:
 npm run demo:serve
 ```
 
-Then open `http://127.0.0.1:4174/`. This command serves only Vite's static preview output; it does not start the full Fastify application or SQLite. The static output can later be copied to static hosting **only after separate owner approval**; no hosting or deployment is configured by this repository.
+Then open `http://127.0.0.1:4174/`. A small Node built-in static-file server reads only `demo-dist/`, binds to loopback and returns 404 for unknown paths such as `/api/health`; it does not start the full Fastify application or SQLite. The static output can later be copied to static hosting **only after separate owner approval**; no hosting or deployment is configured by this repository.
 
 ## Verification
 
