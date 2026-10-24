@@ -380,6 +380,10 @@ export class ExperimentEngine {
             if(currentRun.ending_proposed_at&&missing.n===0){this.db.prepare('UPDATE experiment_participants SET ending_vote=NULL WHERE experiment_id=?').run(id);this.db.prepare('UPDATE experiments SET ending_proposed_at=NULL,ending_proposed_by=NULL WHERE id=?').run(id);emitted.push(this.insertEvent(id,'ending.declined',{sheepAgreement:sheepVotes.yes},now));}
           }
         }
+        if(action.type==='submit_verdict'){
+          const missing=this.db.prepare("SELECT count(*) AS n FROM experiment_participants p LEFT JOIN investigation_votes v ON v.experiment_id=p.experiment_id AND v.character_id=p.character_id WHERE p.experiment_id=? AND p.role='sheep' AND v.character_id IS NULL").get(id) as {n:number};
+          if(missing.n===0)this.finishInvestigation(id,now,emitted);
+        }
         const after=this.db.prepare('SELECT status FROM experiments WHERE id=?').get(id) as {status:RunStatus};
         if((after.status==='running'||after.status==='paused')&&action.type==='transfer_flag'&&this.capturedFlagCount(id)>=3)this.finishFlagVictory(id,'wolves','three_flags_captured',now,emitted);
         const afterTerminal=this.db.prepare('SELECT status FROM experiments WHERE id=?').get(id) as {status:RunStatus};
@@ -445,8 +449,6 @@ export class ExperimentEngine {
       this.db.prepare('INSERT INTO investigation_votes (experiment_id,character_id,conclusion_id,created_at) VALUES (?,?,?,?)').run(id,p.character_id,action.conclusionId,now);
       this.db.prepare('UPDATE investigation_opinions SET final_conclusion_id=? WHERE experiment_id=? AND character_id=?').run(action.conclusionId,id,p.character_id);
       events.push(this.insertEvent(id,'investigation.vote_recorded',{characterId:p.character_id},now,'observer'));
-      const missing=this.db.prepare("SELECT count(*) AS n FROM experiment_participants p LEFT JOIN investigation_votes v ON v.experiment_id=p.experiment_id AND v.character_id=p.character_id WHERE p.experiment_id=? AND p.role='sheep' AND v.character_id IS NULL").get(id) as {n:number};
-      if(missing.n===0)this.finishInvestigation(id,now,events);
       return {summary:'Submitted a private final verdict.'};
     }
     if(action.type==='transfer_flag'){

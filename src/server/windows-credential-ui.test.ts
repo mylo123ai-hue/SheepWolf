@@ -108,6 +108,7 @@ describe('Windows protected credential Settings browser acceptance',()=>{
       'Leak checks: API responses, browser-rendered content, browser local/session storage, exported/list history response, SQLite/WAL/SHM files and child-process output contained neither disposable credential.',
       'Disposable credential namespace was removed during test cleanup.'
     ].join('\n')+'\n');
+    console.info(`Windows Settings browser acceptance environment: Windows Server ${release()} (${version()}), Node ${process.version}, headless Chromium ${browser.version()}.`);
     await stopServer(server);
   },120_000);
 });
