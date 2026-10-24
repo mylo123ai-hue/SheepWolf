@@ -40,6 +40,20 @@
 .flag-transfer-row>span strong { color:var(--text); }
 .flag-transfer-row time { color:var(--muted); font-size:10px; white-space:nowrap; }
 .flag-board .privacy-note { margin:14px 0 0; }
+
+.investigation-brief,.investigation-board{margin:0 0 18px;padding:19px 21px;border:1px solid var(--line);border-radius:12px;background:var(--paper)}
+.investigation-brief h2,.investigation-board h3{font:24px var(--font-display);margin:6px 0;color:var(--ink)}
+.investigation-brief p,.case-summary p,.investigation-board-head p{font-size:11px;line-height:1.65;color:var(--muted)}
+.evidence-list,.observer-evidence{margin:14px 0;color:var(--muted);font-size:10px;line-height:1.65}
+.evidence-list strong,.observer-evidence strong,.conclusion-options strong,.verdict-tally>strong,.opinion-table>strong{display:block;margin-bottom:7px;color:var(--ink);font-size:10px}
+.evidence-list ol,.observer-evidence ol{padding-left:19px;margin:0;display:grid;gap:5px}
+.conclusion-options{display:flex;gap:6px;flex-wrap:wrap;align-items:center;font-size:9px}
+.conclusion-options strong{width:100%}.conclusion-options span{padding:5px 8px;border-radius:20px;background:#f2f4ee;color:#687965}
+.investigation-board-head{display:flex;justify-content:space-between;gap:14px;align-items:flex-start}.investigation-board-head h3{margin:5px 0}.investigation-phase{border-radius:20px;padding:5px 9px;text-transform:uppercase;font-size:8px;letter-spacing:.7px;background:#eef2ea;color:#698465}.investigation-phase.voting{background:#f8f1de;color:#9a783e}.investigation-phase.incomplete{background:#f9ece8;color:#a55f50}
+.case-summary{display:grid;grid-template-columns:1fr 1fr;gap:11px;border:1px solid var(--line);border-radius:9px;padding:12px}.case-summary>p{grid-column:1/-1;margin:0}.case-summary>div{display:grid;gap:4px}.case-summary span,.opinion-row small{font-size:8px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}.case-summary strong{font-size:10px;color:var(--ink)}
+.verdict-tally{margin:14px 0;display:grid;gap:5px}.verdict-tally>div{display:flex;justify-content:space-between;padding:7px 9px;border-radius:6px;background:#f6f7f3;font-size:9px;color:#70796b}.verdict-tally b{font-size:10px;color:var(--ink)}
+.opinion-table{display:grid;gap:0}.opinion-row{display:grid;grid-template-columns:.65fr 1.2fr 1.3fr 1.2fr;gap:8px;padding:9px 0;border-top:1px solid var(--line);font-size:9px;color:var(--ink)}.opinion-row>span:not(:first-child){display:grid;align-content:start;gap:4px}.opinion-name{font-weight:700}.opinion-row em{font-style:normal;font-size:7px;color:#678362}.missing-votes{font-size:9px;color:#a35e4d;background:#fbefec;padding:8px;border-radius:6px}.investigation-result{display:grid;gap:4px;margin-top:13px;padding:12px;border-radius:8px;background:#eef2ea;color:#587653}.investigation-result strong{font-size:11px}.investigation-result span,.correlation-note{font-size:9px;line-height:1.5;color:#778273}.correlation-note{margin:11px 0 0;color:var(--muted)}
+.opinion-change-list{display:grid;gap:0;margin:13px 0}.opinion-change-list>strong{font-size:10px;margin-bottom:5px}.opinion-change-list>div{display:grid;grid-template-columns:.6fr 1.6fr auto;gap:8px;padding:7px 0;border-top:1px solid var(--line);font-size:8px;color:var(--muted)}.opinion-change-list time{white-space:nowrap}
 .private-game-event { background:rgba(198,160,99,.07); }
 .private-game-event .activity-avatar { color:#987648; }
 .private-game-event>div:nth-child(2)>p { line-height:1.55; }
@@ -55,6 +69,8 @@
 }
 @media (max-width: 600px) {
   .flag-board { padding:16px; }
+  .investigation-brief,.investigation-board{padding:15px}
+  .opinion-row{grid-template-columns:1fr 1fr}.case-summary{grid-template-columns:1fr}
   .flag-board-heading { align-items:flex-start; }
   .flag-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
   .flag-summary { flex-wrap:wrap; gap:8px 14px; }

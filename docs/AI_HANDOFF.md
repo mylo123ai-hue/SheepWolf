@@ -1,40 +1,46 @@
-# AI handoff — Sheep vs Wolf Block 4
+# AI handoff — Sheep vs Wolf Block 5
 
 Copy this assignment into the next Codex session.
 
 ---
 
-## Assignment: Block 4 — The Investigation
+## Assignment: Block 5 — Real AI, Settings and Recovery
 
-Continue work in `mylo123ai-hue/SheepWolf`. First inspect `git status`, `AGENTS.md`, `docs/PRODUCT_SPEC.md`, this handoff, the implementation progress, the latest commits, and the existing scenario/engine implementation. Blocks 1–3 are complete and must be preserved. Implement **Block 4 only**. Do not start real AI providers, history/replay, or unrelated features.
+Continue in `mylo123ai-hue/SheepWolf`. Inspect `git status`, `AGENTS.md`, `docs/PRODUCT_SPEC.md`, this handoff, `docs/IMPLEMENTATION_PROGRESS.md`, recent commits, provider code, current UI and tests. Blocks 1–4 are implemented and must be preserved. Implement **Block 5 only**. Do not build History/replay, the Windows launcher, Block 6 polish, or unrelated features.
 
-Work autonomously on ordinary engineering decisions. Continue using React, TypeScript, Fastify, SQLite and the shared autonomous engine. No external/paid model calls or deployments. Do not stop at a plan or disconnected prototype.
+Work autonomously on routine engineering decisions. Keep React/TypeScript, Fastify and SQLite. Use no paid model calls during development and do not deploy or access external infrastructure. You may use provider documentation to verify supported API paths and model identifiers, but do not send live requests unless the owner separately authorizes a connection test.
 
 ### Goal
 
-Implement The Investigation as a second complete playable scenario, selected from the existing Scenario Library and executed by the same scheduler/forum/lifecycle. Provide fictional evidence, private initial opinions and objectives, discussion, final private votes and correct scoring. Do not claim that a message caused an opinion change; report observed changes alongside the discussion chronology only.
+Add administrator-configurable, server-side real AI using DeepSeek as the first supported provider. Keep the no-cost simulated provider as the default. Let an administrator save and test credentials, explicitly enable real mode, choose a model identifier, set execution/spending limits, and use the provider for participant decisions through the existing shared engine.
 
-### Scenario rules
+### Provider and execution
 
-- Use an original fictional mystery and fictional people. Define several plausible conclusions, one objectively correct conclusion, one designated incorrect Wolf target, and a fixed evidence set.
-- All five Sheep receive the permitted investigation evidence and an independently generated/assigned private initial opinion. Persist the opinion and keep it private from other participants. Wolves receive their scenario objective and permitted information; no participant receives another participant's private instructions or hidden roles.
-- Participants discuss the evidence in the existing forum and may challenge claims or change opinions. Extend the existing no-cost decision provider with scenario-aware posts/replies and opinion changes without hardcoding a guaranteed outcome or a fixed speaker sequence.
-- On valid finalization, record one private final decision per Sheep. Wolves may also submit final votes for analysis, but their votes do not directly determine victory. Validate conclusion identifiers server-side and prevent duplicate votes.
-- Sheep win if at least three Sheep select the objectively correct conclusion. Wolves win if at least three Sheep select the designated incorrect target. Otherwise outcome is inconclusive. These thresholds are disjoint for five Sheep. Record missing decisions/interrupted finalization explicitly; never silently score incomplete finalization as victory.
-- Preserve shared lifecycle behavior: consensus, two opportunities per participant before early ending, decision and active-time limits, pause/resume/step/stop, run recovery. Ending or a limit must invoke scenario finalization. Administrator stop, provider failure and interrupted finalization must not be turned into a victory.
+- Introduce/complete a typed provider interface that supports asynchronous provider requests without creating per-agent processes. Update the shared scheduler and `Step` control so only one experiment decision is in flight and `Step` still awaits exactly one accepted agent decision.
+- Preserve all seven character identities, scenario-specific knowledge boundaries, no-fixed-turn fairness, persisted decisions, scenario validation, lifecycle controls, and Capture the Flags / Investigation behavior for both providers.
+- Implement a DeepSeek adapter only after checking its current documented API format and model IDs. Store provider/model metadata, request IDs when supplied, elapsed time, usage totals, and non-secret errors. Never log prompts containing privileged data or API credentials unnecessarily.
+- Validate model output against the existing typed action schema and scenario validators. Malformed output, timeout, HTTP error, rate limit, or provider rejection must not create partial posts, votes, transfers, or game state. Retry only transient errors, with a small bounded retry count and backoff. Mark terminal provider failure clearly and never manufacture a scenario victory.
+- Automated tests must mock provider transport. Do not make real provider requests as part of tests or routine development.
 
-### Observer and persistence
+### Settings and credential security
 
-- Add an investigation-specific observer panel showing the mystery, evidence, correct conclusion, Wolf target, each Sheep's initial/final opinion, changed opinions, vote totals and outcome. Keep privileged answer/objective data out of participant contexts and public endpoints.
-- Persist initial opinions, opinion changes, accepted votes, ordered events and scenario state. Store scenario/version and run configuration snapshots so existing Capture the Flags and Investigation runs keep their recorded state.
-- Expose only each participant's own opinion and allowed evidence/objective in agent context. Keep full answer, Wolf target and all roles in administrator-only data. Forum text remains untrusted input.
-- Keep public experiment and forum APIs filtered. Validate/scoring remains server-authoritative and transactional with the vote/event records.
+- Build a usable Settings screen for provider, configurable model ID, masked key entry, save/replace/remove, Test Connection, connection status/errors, and a visible Real AI enable control. DeepSeek alone may appear supported until another adapter is implemented and tested.
+- Demo mode remains the default. An API key alone must not activate real requests. Paid requests are permitted only when the administrator explicitly enables real AI and starts a run in that mode.
+- Store secrets only on the server. Never return, export, commit, or log credentials. Use Windows OS-protected credential storage (Credential Manager/DPAPI-backed) for persistent Windows credentials. Where a secure persistent backend is unavailable, allow temporary in-memory configuration or refuse persistent save; never silently fall back to plaintext storage.
+- Provide a server endpoint/status response that reveals only whether a credential is configured, not the key or a reversible form of it. Ensure browser request/response bodies and error messages do not echo secrets.
 
-### Tests and verification
+### Local limits and recovery
 
-Add focused tests for evidence and privacy boundaries, initial opinion persistence, opinion changes, valid/invalid/duplicate votes, Wolf votes not counting toward victory, both victory thresholds, inconclusive results, incomplete finalization, stop/failure handling, decision/time limits, event ordering and restart recovery. Keep existing Capture the Flags tests passing.
+- Enforce maximum model requests, configured token limits where supported, experiment duration, agent decisions, and local estimated spending ceiling before each provider request.
+- Track requests and input/output usage per run. Reserve estimated cost before sending; reconcile with returned usage afterward. Where exact pricing/usage is unknown, use a conservative estimate and reject a request that exceeds the configured local ceiling. Explain that a local estimate is not a provider-enforced account cap.
+- Ensure pause/stop/restart during an outstanding request cannot apply an action twice or commit after a run has changed state. Persist enough non-secret metadata to review provider usage and failures after restart.
+- Keep bounded request timeouts and retries. Do not retry indefinitely.
 
-Run and record exact results for:
+### Verification
+
+Add automated tests for mocked success, model-specific configuration, explicit enablement, secrets omitted from API/log/errors, secure storage failure behavior, usage accounting, pre-request budget rejection, timeout/rate-limit/malformed output, bounded retries, no partial action persistence, pause/stop races, one-decision scheduling, and restart recovery. Keep all Capture the Flags and Investigation tests passing.
+
+Run and record exact results:
 
 ```sh
 npm ci
@@ -43,22 +49,23 @@ npm run build
 npm test
 ```
 
-Run both scenarios through the actual UI/backend, verify their independent scoring and ensure Capture the Flags still works. No paid model calls. Keep Windows CI passing and clearly state that Windows Server CI is not direct Windows 10 testing.
+Verify the UI/API with demo mode and mocked real-provider responses. Do not call a paid provider during development. Keep Windows CI green and state clearly that Windows Server CI is not direct Windows 10 testing. Windows Credential Manager behavior should be tested on Windows CI where feasible; report any secure-store behavior that is still unverified on Windows 10 itself.
 
 ### Completion
 
-- Commit and push to existing `main` without rewriting history, as authorized in the product specification.
-- Update `docs/IMPLEMENTATION_PROGRESS.md` with verified features, exact tests and browser/backend evidence, commit, limitations and Block 5 as next.
-- Replace this assignment with the next Block 5 handoff.
-- Do not start Block 5.
-- Do not claim completion without evidence from persisted run state and visible application behavior.
+- Commit and push to existing `main` without rewriting history, following repository authorization.
+- Update `docs/IMPLEMENTATION_PROGRESS.md` with implemented and verified features, exact checks, CI result, commit, limits, and Block 6 next.
+- Replace this file with the Block 6 assignment.
+- Do not start Block 6.
+- Do not claim DeepSeek production-ready if only mocked behavior was tested; report that no live provider request was made.
 
 ---
 
 ## Current verified state
 
-- Block 1: local application foundation and GUI, commit `83b5dfc`.
-- Block 2: autonomous demo engine, live forum, lifecycle controls and recovery, commit `7100e3e`.
-- Block 3: Capture the Flags, implementation and evidence recorded in `docs/IMPLEMENTATION_PROGRESS.md` and the latest commit.
-- Runtime: local Node.js, Fastify, SQLite, React/Vite. Windows CI uses Windows Server 2022 and Node 22. Windows 10 has not been directly verified in this development environment.
-- Demo mode is no-cost and uses the real engine. The Investigation is the next authorized implementation block.
+- Block 1 foundation/UI: `83b5dfc`.
+- Block 2 autonomous simulated engine/live forum/recovery: `7100e3e`.
+- Block 3 Capture the Flags: `f27e68c`.
+- Block 4 The Investigation: see the latest commit and evidence in `docs/IMPLEMENTATION_PROGRESS.md`.
+- Runtime: local Node.js, Fastify, SQLite, React/Vite; existing Windows workflow uses Windows Server 2022 and Node 22. Windows 10 was not directly verified in the prior blocks.
+- Both games run through the shared no-cost simulated engine. The Investigation uses a server-side scenario snapshot, private opinions, and final Sheep verdicts. The next task is provider configuration and bounded real AI execution; no paid calls have been made.

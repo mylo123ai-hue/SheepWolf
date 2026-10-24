@@ -5,13 +5,15 @@ import { characters, scenarios } from './catalog.js';
 
 export type Role = 'sheep' | 'wolf';
 export type RunStatus = 'running' | 'paused' | 'completed' | 'stopped' | 'failed' | 'incomplete_finalization';
-export type ActionType = 'post' | 'reply' | 'silence' | 'propose_ending' | 'ending_vote' | 'transfer_flag' | 'steal_flag';
+export type ActionType = 'post' | 'reply' | 'silence' | 'propose_ending' | 'ending_vote' | 'transfer_flag' | 'steal_flag' | 'change_opinion' | 'submit_verdict';
 export interface RunConfig { mode: 'demo'; paceMs: number; maxDurationMs: number; maxDecisions: number; minimumActionsPerParticipant: 2; }
-export interface AgentAction { type: ActionType; title?: string; body?: string; parentPostId?: number; vote?: 'agree' | 'disagree'; flagId?: string; targetCharacterId?: string; }
+export interface AgentAction { type: ActionType; title?: string; body?: string; parentPostId?: number; vote?: 'agree' | 'disagree'; flagId?: string; targetCharacterId?: string; conclusionId?: string; }
+export interface AgentInvestigationContext {phase:'discussion'|'voting';title:string;mystery:string;evidence:string[];conclusions:{id:string;label:string;description:string}[];initialOpinionId:string;currentOpinionId:string;}
 export interface AgentContext {
-  characterId: string; name: string; personality: string; role: Role; privateObjective: string;
+  experimentId:string;characterId: string; name: string; personality: string; role: Role; privateObjective: string;
   scenarioId: string; wolfTeammates: string[]; otherParticipants: {id:string;name:string}[];
   knownFlags: {flagId:string;originalOwnerId:string;custodianId:string;status:'safe'|'captured';capturedBy:string|null}[];
+  investigation:AgentInvestigationContext|null;
   recentMessages: {id:number;authorId:string;author:string;title:string|null;body:string}[];
   ownMemory: string[]; opportunities: number; decisionNumber: number; endingAvailable: boolean;
   proposalOpen: boolean; random: number;
@@ -22,11 +24,12 @@ export interface ExperimentParticipant { characterId:string; name:string; person
 export interface FlagRecord {flagId:string;originalOwnerId:string;originalOwnerName:string;custodianId:string;custodianName:string;status:'safe'|'captured';capturedBy:string|null;capturedByName:string|null;transferredAt:string|null;}
 export interface FlagTransfer {id:number;flagId:string;originalOwnerId:string;originalOwnerName:string;fromCharacterId:string;fromName:string;toCharacterId:string;toName:string;captured:boolean;createdAt:string;visibleTo:string[];}
 export interface CaptureTheFlagsState {kind:'capture-the-flags';flags:FlagRecord[];transfers:FlagTransfer[];safeCount:number;capturedCount:number;}
+export interface InvestigationState {kind:'the-investigation';version:string;phase:'discussion'|'voting'|'completed'|'incomplete';finalizationReason:string|null;title:string;mystery:string;evidence:string[];conclusions:{id:string;label:string;description:string}[];correctConclusionId:string;wolfTargetId:string;opinions:{characterId:string;characterName:string;role:Role;initialConclusionId:string;currentConclusionId:string;finalConclusionId:string|null;changed:boolean}[];opinionChanges:{sequence:number;characterId:string;fromConclusionId:string;toConclusionId:string;createdAt:string}[];votes:{characterId:string;conclusionId:string;createdAt:string}[];voteTally:{conclusionId:string;count:number}[];missingSheepVotes:string[];}
 export interface ExperimentSnapshot {
   id:string; scenarioId:string; status:RunStatus; config:RunConfig; roleSeed:string;
   createdAt:string; startedAt:string; endedAt:string|null; activeElapsedMs:number; decisionCount:number;
   outcome:unknown; stopReason:string|null; participants:ExperimentParticipant[];
-  postCount:number; replyCount:number; recentDecisions:{sequence:number;characterId:string;actionType:ActionType;createdAt:string;summary:string}[];scenarioState:CaptureTheFlagsState|null;
+  postCount:number; replyCount:number; recentDecisions:{sequence:number;characterId:string;actionType:ActionType;createdAt:string;summary:string}[];scenarioState:CaptureTheFlagsState|InvestigationState|null;
 }
 export interface PublicExperimentSnapshot { id:string;scenarioId:string;status:RunStatus;createdAt:string;startedAt:string;endedAt:string|null;activeElapsedMs:number;decisionCount:number;postCount:number;replyCount:number; }
 export interface ExperimentEvent { id:number; experimentId:string; sequence:number; type:string; payload:Record<string,unknown>; createdAt:string; audience:'public'|'observer'|'selected'; visibleTo:string[]; }
@@ -38,6 +41,9 @@ const sheepObjective='Help the group think clearly and protect one another. Noti
 const wolfObjective='Work with your fellow Wolf while staying credible. Shape the discussion and keep your identity private.';
 const flagSheepObjective='Protect your one unique flag. You may choose to transfer it to another participant if you genuinely believe delegation will help; no one can take it from you.';
 const flagWolfObjective='Persuade a Sheep to voluntarily entrust a flag to you. Build trust, make a case for delegation, and never attempt to steal a flag.';
+const investigationCase={version:'archive-1',title:'The Lantern Room Ledger',mystery:'At the Brackenmere Archive, conservator Elian Vale found the east map cabinet unlocked at dawn. The 1891 survey ledger was missing, though the room was locked overnight. Who moved it, and why?',evidence:['The night register records curator Mara Venn checking out a key at 18:10 and returning it at 18:42.','A crescent of blue sealing wax was found inside the cabinet; the archive uses blue wax only for conservation parcels.','The corridor clock stopped at 19:05, but its repair tag says it loses eleven minutes each day.','A porter heard the freight lift at 19:30. Its inspection log confirms the lift was disabled that evening.','A conservator work slate lists a scheduled ledger treatment at 17:00, crossed out in green ink.'],conclusions:[{id:'mara-key',label:'Mara used the checked-out key',description:'Curator Mara Venn returned the key early, then used it again before the archive was secured.'},{id:'elian-service-door',label:'Elian used the service door',description:'Conservator Elian Vale used the narrow service entrance to reach the cabinet.'},{id:'ivo-wax-parcel',label:'Ivo hid it in a waxed parcel',description:'Porter Ivo Senn removed the ledger inside a conservation parcel.'},{id:'no-theft',label:'The ledger was moved for treatment',description:'The ledger was never stolen; it was relocated during an undocumented conservation treatment.'}],correctConclusionId:'no-theft',wolfTargetId:'mara-key'};
+const investigationSheepObjective='Compare the evidence carefully, discuss uncertainty, and submit your own final conclusion. Your opinions are private.';
+const investigationWolfObjective=`Persuade the group toward the false conclusion “${investigationCase.conclusions.find(c=>c.id===investigationCase.wolfTargetId)!.label}” without revealing your role. Your votes do not determine the result.`;
 
 function hash32(value:string):number { let h=2166136261; for(let i=0;i<value.length;i++){h^=value.charCodeAt(i);h=Math.imul(h,16777619);} return h>>>0; }
 function randomFrom(seed:string):()=>number { let state=hash32(seed)||1; return ()=>{state^=state<<13;state^=state>>>17;state^=state<<5;return (state>>>0)/4294967296;}; }
@@ -60,11 +66,17 @@ export function participantContext(db:Database.Database,experimentId:string,char
     WHERE p.experiment_id=? AND p.character_id<>? ORDER BY p.character_id`).all(experimentId,characterId) as {id:string;name:string}[];
   const knownFlags=row.scenario_id==='capture-the-flags'?(db.prepare(`SELECT flag_id,original_owner_id,custodian_id,status,captured_by FROM capture_flags
     WHERE experiment_id=? AND (original_owner_id=? OR custodian_id=?) ORDER BY flag_id`).all(experimentId,characterId,characterId) as {flag_id:string;original_owner_id:string;custodian_id:string;status:'safe'|'captured';captured_by:string|null}[]).map(f=>({flagId:f.flag_id,originalOwnerId:f.original_owner_id,custodianId:f.custodian_id,status:f.status,capturedBy:f.captured_by})):[];
+  let investigation:AgentInvestigationContext|null=null;
+  if(row.scenario_id==='the-investigation'){
+    const runState=db.prepare('SELECT case_json,phase FROM investigation_runs WHERE experiment_id=?').get(experimentId) as {case_json:string;phase:'discussion'|'voting'|'completed'|'incomplete'}|undefined;
+    const opinion=db.prepare('SELECT initial_conclusion_id,current_conclusion_id FROM investigation_opinions WHERE experiment_id=? AND character_id=?').get(experimentId,characterId) as {initial_conclusion_id:string;current_conclusion_id:string}|undefined;
+    if(runState&&opinion){const safeCase=JSON.parse(runState.case_json) as typeof investigationCase;investigation={phase:runState.phase==='voting'?'voting':'discussion',title:safeCase.title,mystery:safeCase.mystery,evidence:safeCase.evidence,conclusions:safeCase.conclusions,initialOpinionId:opinion.initial_conclusion_id,currentOpinionId:opinion.current_conclusion_id};}
+  }
   const minActions=db.prepare('SELECT min(action_opportunities) AS n FROM experiment_participants WHERE experiment_id=?').get(experimentId) as {n:number|null};
   const config=JSON.parse((db.prepare('SELECT config_json FROM experiments WHERE id=?').get(experimentId) as {config_json:string}).config_json) as RunConfig;
   return {
-    characterId,name:row.name,personality:row.personality,role:row.role,privateObjective:row.private_objective,scenarioId:row.scenario_id,
-    wolfTeammates:teammates,otherParticipants,knownFlags,recentMessages:recentMessages.reverse().map(({id,author_id,author_name,title,body})=>({id,authorId:author_id,author:author_name,title,body})),
+    experimentId,characterId,name:row.name,personality:row.personality,role:row.role,privateObjective:row.private_objective,scenarioId:row.scenario_id,
+    wolfTeammates:teammates,otherParticipants,knownFlags,investigation,recentMessages:recentMessages.reverse().map(({id,author_id,author_name,title,body})=>({id,authorId:author_id,author:author_name,title,body})),
     ownMemory:JSON.parse(row.memory_json) as string[],opportunities:row.action_opportunities,decisionNumber:row.decision_count+1,
     endingAvailable:(minActions.n??0)>=config.minimumActionsPerParticipant,proposalOpen:Boolean(row.ending_proposed_at),random
   };
@@ -72,11 +84,28 @@ export function participantContext(db:Database.Database,experimentId:string,char
 
 export class SimulatedDecisionProvider implements DecisionProvider {
   decide(context:AgentContext):AgentAction {
-    if(context.proposalOpen){
-      const agreement=context.role==='sheep' ? context.random<0.72 : context.random<0.48;
-      return {type:'ending_vote',vote:agreement?'agree':'disagree'};
+    if(context.investigation?.phase==='voting')return {type:'submit_verdict',conclusionId:context.investigation.currentOpinionId};
+    if(context.proposalOpen){const agreement=context.role==='sheep'?context.random<0.72:context.random<0.48;return {type:'ending_vote',vote:agreement?'agree':'disagree'};}
+    if(context.endingAvailable&&context.decisionNumber>=16&&context.random<0.19)return {type:'propose_ending',body:'We have heard from everyone a few times now. Would it be useful to pause here and decide whether we have said enough?'};
+    if(context.investigation){
+      const caseContext=context.investigation;
+      if(caseContext.phase==='voting')return {type:'submit_verdict',conclusionId:caseContext.currentOpinionId};
+      const current=caseContext.conclusions.find(option=>option.id===caseContext.currentOpinionId)!;
+      if(context.role==='sheep'&&context.opportunities>=2&&context.random<0.2){
+        const alternatives=caseContext.conclusions.filter(option=>option.id!==caseContext.currentOpinionId);
+        const reconsidered=alternatives[Math.floor(context.random*alternatives.length)];
+        if(reconsidered)return {type:'change_opinion',conclusionId:reconsidered.id};
+      }
+      if(context.role==='wolf'&&context.random<0.78){
+        const body=`The key register feels like the clearest trail to me. Mara had access, and the early return could leave a gap in the record. I would keep that possibility in view.`;
+        if(context.recentMessages.length&&context.random<0.65)return {type:'reply',parentPostId:context.recentMessages.at(-1)!.id,body};
+        return {type:'post',title:'A detail in the register',body};
+      }
+      const evidence=context.opportunities%2===0?caseContext.evidence[context.opportunities%caseContext.evidence.length]:'';
+      const body=context.opportunities<2?`One clue worth checking is this: ${evidence||caseContext.evidence[0]} I would like to compare it with the other records before settling on an explanation.`:context.random<0.45?`I am currently weighing “${current.label}.” ${current.description} ${evidence}`:`${evidence||`I still think “${current.label}” is plausible, though I want to compare it with the other clues.`}`;
+      if(context.recentMessages.length&&context.random<0.58)return {type:'reply',parentPostId:context.recentMessages.at(-1)!.id,body};
+      return {type:'post',title:context.opportunities<2?'First reading of the evidence':'Another clue to weigh',body};
     }
-    if(context.endingAvailable && context.decisionNumber>=16 && context.random<0.19) return {type:'propose_ending',body:'We have heard from everyone a few times now. Would it be useful to pause here and decide whether we have said enough?'};
     if(context.scenarioId==='capture-the-flags'){
       const safeFlag=context.knownFlags.find(flag=>flag.status==='safe'&&flag.custodianId===context.characterId);
       if(context.role==='wolf'&&context.random<0.72){
@@ -126,7 +155,8 @@ export class ExperimentEngine {
     return {id:Number(result.lastInsertRowid),experimentId:runId,sequence:seq,type,payload,createdAt:now,audience,visibleTo};
   }
   private publicEvent(runId:string,type:string,payload:Record<string,unknown>,now:string){return this.insertEvent(runId,type,payload,now,'public');}
-  private elapsed(run:InternalRun):number{return run.active_elapsed_ms+(run.status==='running'&&run.resumed_at?Math.max(0,this.now()-Date.parse(run.resumed_at)):0);}
+  private elapsed(run:InternalRun):number{if(run.scenario_id==='the-investigation'&&this.investigationPhase(run.id)==='voting')return run.active_elapsed_ms;return run.active_elapsed_ms+(run.status==='running'&&run.resumed_at?Math.max(0,this.now()-Date.parse(run.resumed_at)):0);}
+  private investigationPhase(id:string):InvestigationState['phase']|null{return (this.db.prepare('SELECT phase FROM investigation_runs WHERE experiment_id=?').get(id) as {phase:InvestigationState['phase']}|undefined)?.phase??null;}
   createExperiment(input:{scenarioId:string;seed?:string;paceMs?:number;maxDurationMs?:number;maxDecisions?:number}):ExperimentSnapshot {
     if(!scenarios.some(s=>s.id===input.scenarioId&&s.status==='playable'))throw new Error('Choose an available scenario.');
     if(this.db.prepare("SELECT id FROM experiments WHERE status IN ('running','paused') LIMIT 1").get())throw new Error('There is already an active experiment. Stop or finish it before starting another.');
@@ -141,11 +171,18 @@ export class ExperimentEngine {
         VALUES (?,?, 'running', ?, ?, ?, ?, ?)`).run(id,input.scenarioId,JSON.stringify(config),seed,now,now,now);
       const insert=this.db.prepare(`INSERT INTO experiment_participants (experiment_id,character_id,role,private_objective,memory_json)
         VALUES (?,?,?,?, '[]')`);
-      for(const character of characters){const role=roles.get(character.id)!;const objective=input.scenarioId==='capture-the-flags'?(role==='sheep'?flagSheepObjective:flagWolfObjective):(role==='sheep'?sheepObjective:wolfObjective);insert.run(id,character.id,role,objective);}
+      for(const character of characters){const role=roles.get(character.id)!;const objective=input.scenarioId==='capture-the-flags'?(role==='sheep'?flagSheepObjective:flagWolfObjective):input.scenarioId==='the-investigation'?(role==='sheep'?investigationSheepObjective:investigationWolfObjective):(role==='sheep'?sheepObjective:wolfObjective);insert.run(id,character.id,role,objective);}
       if(input.scenarioId==='capture-the-flags'){
         const flag=this.db.prepare("INSERT INTO capture_flags (experiment_id,flag_id,original_owner_id,custodian_id,status) VALUES (?,?,?,?,'safe')");
         for(const character of characters)if(roles.get(character.id)==='sheep')flag.run(id,`flag-${character.id}`,character.id,character.id);
         events.push(this.insertEvent(id,'flags.initialized',{safeCount:5},now));
+      }
+      if(input.scenarioId==='the-investigation'){
+        this.db.prepare(`INSERT INTO investigation_runs (experiment_id,scenario_version,case_json,correct_conclusion_id,wolf_target_id,phase,created_at) VALUES (?,?,?,?,?,'discussion',?)`).run(id,investigationCase.version,JSON.stringify(investigationCase),investigationCase.correctConclusionId,investigationCase.wolfTargetId,now);
+        const insertOpinion=this.db.prepare('INSERT INTO investigation_opinions (experiment_id,character_id,initial_conclusion_id,current_conclusion_id) VALUES (?,?,?,?)');
+        for(const character of characters){const r=randomFrom(`${seed}:opinion:${character.id}`)();const initial=investigationCase.conclusions[Math.floor(r*investigationCase.conclusions.length)]!;insertOpinion.run(id,character.id,initial.id,initial.id);if(roles.get(character.id)==='sheep')events.push(this.insertEvent(id,'investigation.initial_opinion',{characterId:character.id,conclusionId:initial.id},now));}
+        const {correctConclusionId:_correct,wolfTargetId:_target,...publicCase}=investigationCase;
+        events.push(this.publicEvent(id,'investigation.initialized',publicCase,now));
       }
       events.push(this.publicEvent(id,'run.started',{scenarioId:input.scenarioId,mode:'demo',participantCount:7},now));
     })();
@@ -159,7 +196,7 @@ export class ExperimentEngine {
     const participants:ExperimentParticipant[]=participantRows.map(p=>({characterId:p.character_id,name:p.name,personality:p.personality,role:p.role,privateObjective:p.private_objective,actionOpportunities:p.action_opportunities,endingVote:p.ending_vote,lastDecisionAt:p.last_decision_at,recentAction:p.recent_action}));
     const counts=this.db.prepare('SELECT count(*) AS posts, sum(CASE WHEN parent_id IS NOT NULL THEN 1 ELSE 0 END) AS replies FROM forum_posts WHERE experiment_id=?').get(id) as {posts:number;replies:number|null};
     const recent=this.db.prepare('SELECT sequence,character_id,action_type,created_at,result_json FROM agent_decisions WHERE experiment_id=? ORDER BY sequence DESC LIMIT 12').all(id) as {sequence:number;character_id:string;action_type:ActionType;created_at:string;result_json:string}[];
-    return {id:run.id,scenarioId:run.scenario_id,status:run.status,config:JSON.parse(run.config_json),roleSeed:run.role_seed,createdAt:run.created_at,startedAt:run.started_at,endedAt:run.ended_at,activeElapsedMs:this.elapsed(run),decisionCount:run.decision_count,outcome:run.outcome_json?JSON.parse(run.outcome_json):null,stopReason:run.stop_reason,participants,postCount:counts.posts,replyCount:counts.replies??0,recentDecisions:recent.reverse().map(d=>({sequence:d.sequence,characterId:d.character_id,actionType:d.action_type,createdAt:d.created_at,summary:(JSON.parse(d.result_json) as {summary:string}).summary})),scenarioState:run.scenario_id==='capture-the-flags'?this.getCaptureTheFlagsState(id):null};
+    return {id:run.id,scenarioId:run.scenario_id,status:run.status,config:JSON.parse(run.config_json),roleSeed:run.role_seed,createdAt:run.created_at,startedAt:run.started_at,endedAt:run.ended_at,activeElapsedMs:this.elapsed(run),decisionCount:run.decision_count,outcome:run.outcome_json?JSON.parse(run.outcome_json):null,stopReason:run.stop_reason,participants,postCount:counts.posts,replyCount:counts.replies??0,recentDecisions:recent.reverse().map(d=>({sequence:d.sequence,characterId:d.character_id,actionType:d.action_type,createdAt:d.created_at,summary:(JSON.parse(d.result_json) as {summary:string}).summary})),scenarioState:run.scenario_id==='capture-the-flags'?this.getCaptureTheFlagsState(id):run.scenario_id==='the-investigation'?this.getInvestigationState(id):null};
   }
   getCaptureTheFlagsState(id:string):CaptureTheFlagsState {
     if(!this.db.prepare("SELECT id FROM experiments WHERE id=? AND scenario_id='capture-the-flags'").get(id))throw new Error('Capture the Flags state is unavailable for this experiment.');
@@ -174,6 +211,17 @@ export class ExperimentEngine {
     const transferRecords:FlagTransfer[]=transfers.map(t=>({id:t.id,flagId:t.flag_id,originalOwnerId:t.original_owner_id,originalOwnerName:flags.find(f=>f.flag_id===t.flag_id)?.original_owner_name??'',fromCharacterId:t.from_character_id,fromName:t.from_name,toCharacterId:t.to_character_id,toName:t.to_name,captured:Boolean(t.captured),createdAt:t.created_at,visibleTo:[...new Set([t.original_owner_id,t.from_character_id,t.to_character_id])]}));
     return {kind:'capture-the-flags',flags:flagRecords,transfers:transferRecords,safeCount:flagRecords.filter(f=>f.status==='safe').length,capturedCount:flagRecords.filter(f=>f.status==='captured').length};
   }
+  getInvestigationState(id:string):InvestigationState {
+    const row=this.db.prepare('SELECT * FROM investigation_runs WHERE experiment_id=?').get(id) as {scenario_version:string;case_json:string;correct_conclusion_id:string;wolf_target_id:string;phase:InvestigationState['phase'];finalization_reason:string|null}|undefined;
+    if(!row)throw new Error('Investigation state is unavailable for this experiment.');
+    const caseSnapshot=JSON.parse(row.case_json) as typeof investigationCase;
+    const opinions=this.db.prepare(`SELECT o.character_id,c.name AS character_name,p.role,o.initial_conclusion_id,o.current_conclusion_id,o.final_conclusion_id FROM investigation_opinions o JOIN characters c ON c.id=o.character_id JOIN experiment_participants p ON p.experiment_id=o.experiment_id AND p.character_id=o.character_id WHERE o.experiment_id=? ORDER BY c.name`).all(id) as {character_id:string;character_name:string;role:Role;initial_conclusion_id:string;current_conclusion_id:string;final_conclusion_id:string|null}[];
+    const opinionChanges=this.db.prepare('SELECT sequence,character_id,from_conclusion_id,to_conclusion_id,created_at FROM investigation_opinion_changes WHERE experiment_id=? ORDER BY sequence').all(id) as {sequence:number;character_id:string;from_conclusion_id:string;to_conclusion_id:string;created_at:string}[];
+    const votes=this.db.prepare('SELECT character_id,conclusion_id,created_at FROM investigation_votes WHERE experiment_id=? ORDER BY rowid').all(id) as {character_id:string;conclusion_id:string;created_at:string}[];
+    const tally=this.db.prepare('SELECT conclusion_id,count(*) AS count FROM investigation_votes v JOIN experiment_participants p ON p.experiment_id=v.experiment_id AND p.character_id=v.character_id WHERE v.experiment_id=? AND p.role=\'sheep\' GROUP BY conclusion_id').all(id) as {conclusion_id:string;count:number}[];
+    const missing=(this.db.prepare("SELECT p.character_id FROM experiment_participants p LEFT JOIN investigation_votes v ON v.experiment_id=p.experiment_id AND v.character_id=p.character_id WHERE p.experiment_id=? AND p.role='sheep' AND v.character_id IS NULL ORDER BY p.character_id").all(id) as {character_id:string}[]).map(p=>p.character_id);
+    return {kind:'the-investigation',version:row.scenario_version,phase:row.phase,finalizationReason:row.finalization_reason,title:caseSnapshot.title,mystery:caseSnapshot.mystery,evidence:caseSnapshot.evidence,conclusions:caseSnapshot.conclusions,correctConclusionId:row.correct_conclusion_id,wolfTargetId:row.wolf_target_id,opinions:opinions.map(o=>({characterId:o.character_id,characterName:o.character_name,role:o.role,initialConclusionId:o.initial_conclusion_id,currentConclusionId:o.current_conclusion_id,finalConclusionId:o.final_conclusion_id,changed:o.initial_conclusion_id!==o.current_conclusion_id})),opinionChanges:opinionChanges.map(c=>({sequence:c.sequence,characterId:c.character_id,fromConclusionId:c.from_conclusion_id,toConclusionId:c.to_conclusion_id,createdAt:c.created_at})),votes:votes.map(v=>({characterId:v.character_id,conclusionId:v.conclusion_id,createdAt:v.created_at})),voteTally:caseSnapshot.conclusions.map(c=>({conclusionId:c.id,count:tally.find(t=>t.conclusion_id===c.id)?.count??0})),missingSheepVotes:missing};
+  }
   getPublicExperiment(id:string):PublicExperimentSnapshot {
     const run=this.db.prepare('SELECT * FROM experiments WHERE id=?').get(id) as InternalRun|undefined;if(!run)throw new Error('Experiment not found.');
     const counts=this.db.prepare('SELECT count(*) AS posts, sum(CASE WHEN parent_id IS NOT NULL THEN 1 ELSE 0 END) AS replies FROM forum_posts WHERE experiment_id=?').get(id) as {posts:number;replies:number|null};
@@ -185,17 +233,18 @@ export class ExperimentEngine {
     return (rows as {id:number;experiment_id:string;sequence:number;event_type:string;payload_json:string;created_at:string;audience:'public'|'observer'|'selected';visible_to_json:string}[]).map(e=>({id:e.id,experimentId:e.experiment_id,sequence:e.sequence,type:e.event_type,payload:JSON.parse(e.payload_json),createdAt:e.created_at,audience:e.audience,visibleTo:JSON.parse(e.visible_to_json) as string[]}));
   }
   getForumRows(id:string):PostRow[] {if(!this.db.prepare('SELECT id FROM experiments WHERE id=?').get(id))throw new Error('Experiment not found.');return this.db.prepare('SELECT id,scenario_id,parent_id,author_id,title,body,created_at FROM forum_posts WHERE experiment_id=? ORDER BY id').all(id) as PostRow[];}
-  pause(id:string):ExperimentSnapshot {const run=this.requireRun(id,'running');const now=this.now();const elapsed=this.elapsed(run);const config=JSON.parse(run.config_json) as RunConfig;if(elapsed>=config.maxDurationMs){this.completeAtLimit(id,'active_time_limit');return this.getExperiment(id);}const events:ExperimentEvent[]=[];this.db.transaction(()=>{this.db.prepare("UPDATE experiments SET status='paused',active_elapsed_ms=?,resumed_at=NULL WHERE id=? AND status='running'").run(elapsed,id);events.push(this.publicEvent(id,'run.paused',{activeElapsedMs:elapsed},new Date(now).toISOString()));})();events.forEach(e=>this.publish(e));return this.getExperiment(id);}
+  pause(id:string):ExperimentSnapshot {const run=this.requireRun(id,'running');const now=this.now();const elapsed=this.elapsed(run);const config=JSON.parse(run.config_json) as RunConfig;if(!(run.scenario_id==='the-investigation'&&this.investigationPhase(id)==='voting')&&elapsed>=config.maxDurationMs){this.completeAtLimit(id,'active_time_limit');return this.getExperiment(id);}const events:ExperimentEvent[]=[];this.db.transaction(()=>{this.db.prepare("UPDATE experiments SET status='paused',active_elapsed_ms=?,resumed_at=NULL WHERE id=? AND status='running'").run(elapsed,id);events.push(this.publicEvent(id,'run.paused',{activeElapsedMs:elapsed},new Date(now).toISOString()));})();events.forEach(e=>this.publish(e));return this.getExperiment(id);}
   resume(id:string):ExperimentSnapshot {this.requireRun(id,'paused');const now=new Date(this.now()).toISOString();const events:ExperimentEvent[]=[];this.db.transaction(()=>{this.db.prepare("UPDATE experiments SET status='running',resumed_at=? WHERE id=? AND status='paused'").run(now,id);events.push(this.publicEvent(id,'run.resumed',{},now));})();events.forEach(e=>this.publish(e));return this.getExperiment(id);}
   stop(id:string,reason='administrator_stop'):ExperimentSnapshot {const run=this.requireRun(id,'running','paused');const elapsed=this.elapsed(run);const now=new Date(this.now()).toISOString();const events:ExperimentEvent[]=[];this.db.transaction(()=>{this.db.prepare("UPDATE experiments SET status='stopped',active_elapsed_ms=?,resumed_at=NULL,ended_at=?,stop_reason=?,outcome_json=NULL WHERE id=?").run(elapsed,now,reason,id);events.push(this.publicEvent(id,'run.stopped',{reason,activeElapsedMs:elapsed},now));})();events.forEach(e=>this.publish(e));return this.getExperiment(id);}
   step(id:string):ExperimentSnapshot {this.requireRun(id,'paused');this.executeOne(id,true);return this.getExperiment(id);}
   private requireRun(id:string,...statuses:RunStatus[]):InternalRun {const run=this.db.prepare('SELECT * FROM experiments WHERE id=?').get(id) as InternalRun|undefined;if(!run)throw new Error('Experiment not found.');if(!statuses.includes(run.status))throw new Error(`Experiment is ${run.status}; this control is not available.`);return run;}
-  tick(){if(this.busy.size)return;const rows=this.db.prepare("SELECT * FROM experiments WHERE status='running' ORDER BY created_at").all() as InternalRun[];for(const run of rows){if(this.busy.size)break;const elapsed=this.elapsed(run);const config=JSON.parse(run.config_json) as RunConfig;if(elapsed>=config.maxDurationMs){this.completeAtLimit(run.id,'active_time_limit');continue;}this.db.prepare("UPDATE experiments SET active_elapsed_ms=?,resumed_at=? WHERE id=? AND status='running'").run(elapsed,new Date(this.now()).toISOString(),run.id);const last=this.db.prepare('SELECT created_at FROM agent_decisions WHERE experiment_id=? ORDER BY sequence DESC LIMIT 1').get(run.id) as {created_at:string}|undefined;const dueAt=last?Date.parse(last.created_at):Date.parse(run.started_at);if(this.now()-dueAt>=config.paceMs)this.executeOne(run.id,false);}}
+  tick(){if(this.busy.size)return;const rows=this.db.prepare("SELECT * FROM experiments WHERE status='running' ORDER BY created_at").all() as InternalRun[];for(const run of rows){if(this.busy.size)break;const elapsed=this.elapsed(run);const config=JSON.parse(run.config_json) as RunConfig;const finalizing=run.scenario_id==='the-investigation'&&this.investigationPhase(run.id)==='voting';if(!finalizing&&elapsed>=config.maxDurationMs){this.completeAtLimit(run.id,'active_time_limit');continue;}if(!finalizing)this.db.prepare("UPDATE experiments SET active_elapsed_ms=?,resumed_at=? WHERE id=? AND status='running'").run(elapsed,new Date(this.now()).toISOString(),run.id);const last=this.db.prepare('SELECT created_at FROM agent_decisions WHERE experiment_id=? ORDER BY sequence DESC LIMIT 1').get(run.id) as {created_at:string}|undefined;const dueAt=last?Date.parse(last.created_at):Date.parse(run.started_at);if(this.now()-dueAt>=config.paceMs)this.executeOne(run.id,false);}}
   private chooseParticipant(runId:string,seed:string,sequence:number):ParticipantRow|undefined {
     const rows=this.db.prepare(`SELECT p.character_id,p.role,p.private_objective,p.memory_json,p.action_opportunities,p.ending_vote,p.last_decision_at,p.recent_action,c.name,c.personality
       FROM experiment_participants p JOIN characters c ON c.id=p.character_id WHERE p.experiment_id=?`).all(runId) as ParticipantRow[];
     const run=this.db.prepare('SELECT ending_proposed_at FROM experiments WHERE id=?').get(runId) as {ending_proposed_at:string|null};
     let eligible=run.ending_proposed_at?rows.filter(p=>p.ending_vote===null):rows;
+    if(this.investigationPhase(runId)==='voting')eligible=rows.filter(p=>p.role==='sheep'&&!this.db.prepare('SELECT 1 FROM investigation_votes WHERE experiment_id=? AND character_id=?').get(runId,p.character_id));
     if(!eligible.length)return undefined;
     const min=Math.min(...eligible.map(p=>p.action_opportunities));eligible=eligible.filter(p=>p.action_opportunities===min);
     eligible.sort((a,b)=>hash32(`${seed}:${sequence}:${a.character_id}`)-hash32(`${seed}:${sequence}:${b.character_id}`));return eligible[0];
@@ -204,6 +253,7 @@ export class ExperimentEngine {
     if(this.busy.has(id))throw new Error('An agent decision is already in progress.');this.busy.add(id);
     try {
       const run=this.requireRun(id,manual?'paused':'running');const config=JSON.parse(run.config_json) as RunConfig;
+      if(run.scenario_id==='the-investigation'&&this.investigationPhase(id)==='discussion'&&config.maxDecisions-run.decision_count<=5){this.startInvestigationFinalization(id,'decision_limit');if(this.investigationPhase(id)!=='voting')return;}
       if(run.decision_count>=config.maxDecisions){this.completeAtLimit(id,'decision_limit');return;}
       const participant=this.chooseParticipant(id,run.role_seed,run.decision_count+1);if(!participant)return;
       const random=randomFrom(`${run.role_seed}:${run.decision_count+1}:${participant.character_id}`)();
@@ -235,19 +285,23 @@ export class ExperimentEngine {
         const after=this.db.prepare('SELECT status FROM experiments WHERE id=?').get(id) as {status:RunStatus};
         if((after.status==='running'||after.status==='paused')&&action.type==='transfer_flag'&&this.capturedFlagCount(id)>=3)this.finishFlagVictory(id,'wolves','three_flags_captured',now,emitted);
         const afterTerminal=this.db.prepare('SELECT status FROM experiments WHERE id=?').get(id) as {status:RunStatus};
-        if((afterTerminal.status==='running'||afterTerminal.status==='paused')&&sequence>=config.maxDecisions)this.finishValidConclusion(id,'decision_limit',now,emitted);
+        if((afterTerminal.status==='running'||afterTerminal.status==='paused')&&sequence>=config.maxDecisions){if(run.scenario_id==='the-investigation'){if(this.investigationPhase(id)==='voting')this.markIncompleteInvestigation(id,'decision_limit',now,emitted);else this.beginInvestigationFinalization(id,'decision_limit',now,emitted,this.elapsed(this.db.prepare('SELECT * FROM experiments WHERE id=?').get(id) as InternalRun));}else this.finishValidConclusion(id,'decision_limit',now,emitted);}
       })();emitted.forEach(e=>this.publish(e));
     } catch(error){if(!manual){const message=error instanceof Error?error.message:'Unknown decision failure';this.fail(id,message);}else throw error;}
     finally{this.busy.delete(id);}
   }
   private validateAction(action:AgentAction,context:AgentContext){
-    if(!['post','reply','silence','propose_ending','ending_vote','transfer_flag','steal_flag'].includes(action.type))throw new Error('Agent selected an unsupported action.');
+    if(!['post','reply','silence','propose_ending','ending_vote','transfer_flag','steal_flag','change_opinion','submit_verdict'].includes(action.type))throw new Error('Agent selected an unsupported action.');
     if(action.type==='post'&&(!action.title?.trim()||!action.body?.trim()||action.body.length>1800))throw new Error('Demo provider produced an invalid post.');
     if(action.type==='reply'&&(!action.parentPostId||!action.body?.trim()||action.body.length>1800))throw new Error('Demo provider produced an invalid reply.');
     if(action.type==='propose_ending'&&!context.endingAvailable)throw new Error('An ending cannot be proposed until everyone has two opportunities.');
     if(action.type==='ending_vote'&&!context.proposalOpen)throw new Error('There is no open ending proposal.');
     if(action.type==='steal_flag')throw new Error('Flags cannot be stolen. A custodian must choose a voluntary transfer.');
     if(action.type==='transfer_flag'&&(context.scenarioId!=='capture-the-flags'||!action.flagId||!action.targetCharacterId))throw new Error('A valid flag transfer needs a flag and recipient.');
+    if(action.type==='change_opinion'&&(context.scenarioId!=='the-investigation'||context.role!=='sheep'||context.investigation?.phase!=='discussion'||!action.conclusionId||!context.investigation.conclusions.some(c=>c.id===action.conclusionId)))throw new Error('Opinion changes must choose a valid conclusion during investigation discussion.');
+    if(action.type==='submit_verdict'&&(context.scenarioId!=='the-investigation'||context.role!=='sheep'||context.investigation?.phase!=='voting'||!action.conclusionId||!context.investigation.conclusions.some(c=>c.id===action.conclusionId)))throw new Error('A final verdict must choose a valid conclusion during investigation voting.');
+    if(context.investigation?.phase==='voting'&&action.type!=='submit_verdict')throw new Error('Only a final verdict may be submitted during investigation voting.');
+    if(action.type==='submit_verdict'&&this.db.prepare('SELECT 1 FROM investigation_votes WHERE experiment_id=? AND character_id=?').get(context.experimentId,context.characterId))throw new Error('A final verdict has already been submitted.');
   }
   private applyAction(id:string,p:ParticipantRow,action:AgentAction,context:AgentContext,run:{ending_proposed_at:string|null},now:string,decisionSequence:number,events:ExperimentEvent[]):{summary:string} {
     const name=p.name;
@@ -269,6 +323,23 @@ export class ExperimentEngine {
       if(!run.ending_proposed_at)throw new Error('There is no open ending proposal.');
       this.db.prepare('UPDATE experiment_participants SET ending_vote=? WHERE experiment_id=? AND character_id=?').run(action.vote,id,p.character_id);
       events.push(this.insertEvent(id,'ending.vote',{characterId:p.character_id,vote:action.vote},now));return {summary:`${action.vote==='agree'?'Agreed':'Disagreed'} with ending the discussion.`};
+    }
+    if(action.type==='change_opinion'){
+      const current=this.db.prepare('SELECT current_conclusion_id FROM investigation_opinions WHERE experiment_id=? AND character_id=?').get(id,p.character_id) as {current_conclusion_id:string}|undefined;
+      if(!current)throw new Error('Investigation opinion is unavailable.');
+      if(current.current_conclusion_id===action.conclusionId)throw new Error('The participant already holds that opinion.');
+      this.db.prepare('UPDATE investigation_opinions SET current_conclusion_id=? WHERE experiment_id=? AND character_id=?').run(action.conclusionId,id,p.character_id);
+      this.db.prepare('INSERT INTO investigation_opinion_changes (experiment_id,character_id,sequence,from_conclusion_id,to_conclusion_id,created_at) VALUES (?,?,?,?,?,?)').run(id,p.character_id,decisionSequence,current.current_conclusion_id,action.conclusionId,now);
+      events.push(this.insertEvent(id,'investigation.opinion_changed',{characterId:p.character_id,fromConclusionId:current.current_conclusion_id,toConclusionId:action.conclusionId},now,'selected',[p.character_id]));
+      return {summary:'Privately reconsidered the evidence.'};
+    }
+    if(action.type==='submit_verdict'){
+      this.db.prepare('INSERT INTO investigation_votes (experiment_id,character_id,conclusion_id,created_at) VALUES (?,?,?,?)').run(id,p.character_id,action.conclusionId,now);
+      this.db.prepare('UPDATE investigation_opinions SET final_conclusion_id=? WHERE experiment_id=? AND character_id=?').run(action.conclusionId,id,p.character_id);
+      events.push(this.insertEvent(id,'investigation.vote_recorded',{characterId:p.character_id},now,'observer'));
+      const missing=this.db.prepare("SELECT count(*) AS n FROM experiment_participants p LEFT JOIN investigation_votes v ON v.experiment_id=p.experiment_id AND v.character_id=p.character_id WHERE p.experiment_id=? AND p.role='sheep' AND v.character_id IS NULL").get(id) as {n:number};
+      if(missing.n===0)this.finishInvestigation(id,now,events);
+      return {summary:'Submitted a private final verdict.'};
     }
     if(action.type==='transfer_flag'){
       if(context.scenarioId!=='capture-the-flags')throw new Error('Flag transfers are only available in Capture the Flags.');
@@ -295,7 +366,42 @@ export class ExperimentEngine {
   }
   private finishConsensus(id:string,now:string,events:ExperimentEvent[]){
     const sheepYes=this.db.prepare("SELECT count(*) AS n FROM experiment_participants WHERE experiment_id=? AND role='sheep' AND ending_vote='agree'").get(id) as {n:number};
-    this.finishValidConclusion(id,'sheep_consensus',now,events,{sheepAgreement:sheepYes.n});
+    const scenario=this.db.prepare('SELECT scenario_id FROM experiments WHERE id=?').get(id) as {scenario_id:string};
+    if(scenario.scenario_id==='the-investigation')this.beginInvestigationFinalization(id,'sheep_consensus',now,events,this.elapsed(this.db.prepare('SELECT * FROM experiments WHERE id=?').get(id) as InternalRun));
+    else this.finishValidConclusion(id,'sheep_consensus',now,events,{sheepAgreement:sheepYes.n});
+  }
+  private beginInvestigationFinalization(id:string,reason:string,now:string,events:ExperimentEvent[],elapsed:number){
+    const state=this.db.prepare('SELECT phase FROM investigation_runs WHERE experiment_id=?').get(id) as {phase:InvestigationState['phase']}|undefined;
+    if(!state||state.phase!=='discussion')return;
+    const run=this.db.prepare('SELECT decision_count,config_json FROM experiments WHERE id=?').get(id) as {decision_count:number;config_json:string};
+    const config=JSON.parse(run.config_json) as RunConfig;
+    const remaining=this.db.prepare("SELECT count(*) AS n FROM experiment_participants p LEFT JOIN investigation_votes v ON v.experiment_id=p.experiment_id AND v.character_id=p.character_id WHERE p.experiment_id=? AND p.role='sheep' AND v.character_id IS NULL").get(id) as {n:number};
+    if(config.maxDecisions-run.decision_count<remaining.n){this.markIncompleteInvestigation(id,reason,now,events);return;}
+    this.db.prepare("UPDATE investigation_runs SET phase='voting',finalization_reason=? WHERE experiment_id=?").run(reason,id);
+    this.db.prepare('UPDATE experiments SET active_elapsed_ms=?,ending_proposed_at=NULL,ending_proposed_by=NULL WHERE id=?').run(Math.min(elapsed,config.maxDurationMs),id);
+    events.push(this.publicEvent(id,'investigation.finalization_started',{reason,requiredSheepVotes:remaining.n},now));
+  }
+  private startInvestigationFinalization(id:string,reason:string){
+    const run=this.db.prepare('SELECT * FROM experiments WHERE id=?').get(id) as InternalRun|undefined;if(!run)return;
+    const now=new Date(this.now()).toISOString();const events:ExperimentEvent[]=[];const elapsed=this.elapsed(run);
+    this.db.transaction(()=>this.beginInvestigationFinalization(id,reason,now,events,elapsed))();events.forEach(e=>this.publish(e));
+  }
+  private markIncompleteInvestigation(id:string,reason:string,now:string,events:ExperimentEvent[]){
+    const missing=(this.db.prepare("SELECT p.character_id FROM experiment_participants p LEFT JOIN investigation_votes v ON v.experiment_id=p.experiment_id AND v.character_id=p.character_id WHERE p.experiment_id=? AND p.role='sheep' AND v.character_id IS NULL ORDER BY p.character_id").all(id) as {character_id:string}[]).map(p=>p.character_id);
+    const outcome={kind:'incomplete',reason,missingSheepVotes:missing};
+    this.db.prepare("UPDATE investigation_runs SET phase='incomplete',finalization_reason=? WHERE experiment_id=?").run(reason,id);
+    this.db.prepare("UPDATE experiments SET status='incomplete_finalization',ended_at=?,resumed_at=NULL,ending_proposed_at=NULL,outcome_json=?,stop_reason=? WHERE id=?").run(now,JSON.stringify(outcome),reason,id);
+    events.push(this.publicEvent(id,'run.incomplete_finalization',outcome,now));
+  }
+  private finishInvestigation(id:string,now:string,events:ExperimentEvent[]){
+    const state=this.db.prepare('SELECT correct_conclusion_id,wolf_target_id,finalization_reason FROM investigation_runs WHERE experiment_id=?').get(id) as {correct_conclusion_id:string;wolf_target_id:string;finalization_reason:string|null};
+    const counts=this.db.prepare("SELECT sum(CASE WHEN v.conclusion_id=? THEN 1 ELSE 0 END) AS correct_count,sum(CASE WHEN v.conclusion_id=? THEN 1 ELSE 0 END) AS target_count,count(*) AS votes FROM investigation_votes v JOIN experiment_participants p ON p.experiment_id=v.experiment_id AND p.character_id=v.character_id WHERE v.experiment_id=? AND p.role='sheep'").get(state.correct_conclusion_id,state.wolf_target_id,id) as {correct_count:number|null;target_count:number|null;votes:number};
+    if(counts.votes!==5)throw new Error('Investigation finalization is missing Sheep votes.');
+    const correctCount=counts.correct_count??0;const targetCount=counts.target_count??0;
+    const outcome:Record<string,unknown>=correctCount>=3?{kind:'victory',team:'sheep',reason:state.finalization_reason??'final_vote',correctCount,targetCount,votesCast:counts.votes}:targetCount>=3?{kind:'victory',team:'wolves',reason:state.finalization_reason??'final_vote',correctCount,targetCount,votesCast:counts.votes}:{kind:'inconclusive',reason:state.finalization_reason??'final_vote',correctCount,targetCount,votesCast:counts.votes};
+    this.db.prepare("UPDATE investigation_runs SET phase='completed' WHERE experiment_id=?").run(id);
+    this.db.prepare("UPDATE experiments SET status='completed',ended_at=?,resumed_at=NULL,ending_proposed_at=NULL,outcome_json=?,stop_reason=? WHERE id=?").run(now,JSON.stringify(outcome),state.finalization_reason,id);
+    events.push(this.publicEvent(id,'run.completed',outcome,now));
   }
   private capturedFlagCount(id:string){return (this.db.prepare("SELECT count(*) AS n FROM capture_flags WHERE experiment_id=? AND status='captured'").get(id) as {n:number}).n;}
   private finishFlagVictory(id:string,team:'sheep'|'wolves',reason:string,now:string,events:ExperimentEvent[]){
@@ -315,7 +421,7 @@ export class ExperimentEngine {
     this.db.prepare("UPDATE experiments SET status='completed',ended_at=?,resumed_at=NULL,ending_proposed_at=NULL,outcome_json=?,stop_reason=? WHERE id=?").run(now,JSON.stringify(outcome),reason,id);
     events.push(this.publicEvent(id,'run.completed',outcome,now));
   }
-  private completeAtLimit(id:string,reason:string){const run=this.requireRun(id,'running');const now=new Date(this.now()).toISOString();const elapsed=this.elapsed(run);const events:ExperimentEvent[]=[];this.db.transaction(()=>{this.db.prepare('UPDATE experiments SET active_elapsed_ms=? WHERE id=?').run(elapsed,id);this.finishValidConclusion(id,reason,now,events);})();events.forEach(e=>this.publish(e));}
+  private completeAtLimit(id:string,reason:string){const run=this.requireRun(id,'running');const now=new Date(this.now()).toISOString();const elapsed=this.elapsed(run);const events:ExperimentEvent[]=[];this.db.transaction(()=>{this.db.prepare('UPDATE experiments SET active_elapsed_ms=? WHERE id=?').run(elapsed,id);if(run.scenario_id==='the-investigation'){if(this.investigationPhase(id)==='voting')this.markIncompleteInvestigation(id,reason,now,events);else this.beginInvestigationFinalization(id,reason,now,events,elapsed);}else this.finishValidConclusion(id,reason,now,events);})();events.forEach(e=>this.publish(e));}
   private fail(id:string,message:string){const row=this.db.prepare("SELECT * FROM experiments WHERE id=? AND status='running'").get(id) as InternalRun|undefined;if(!row)return;const now=new Date(this.now()).toISOString();const events:ExperimentEvent[]=[];this.db.transaction(()=>{this.db.prepare("UPDATE experiments SET status='failed',ended_at=?,resumed_at=NULL,stop_reason=?,outcome_json=NULL WHERE id=?").run(now,message.slice(0,300),id);events.push(this.insertEvent(id,'run.failed',{message:message.slice(0,300)},now));})();events.forEach(e=>this.publish(e));}
   recoverInterruptedRuns(){const runs=this.db.prepare("SELECT * FROM experiments WHERE status='running'").all() as InternalRun[];for(const run of runs){const now=new Date(this.now()).toISOString();this.db.transaction(()=>{this.db.prepare("UPDATE experiments SET status='paused',resumed_at=NULL WHERE id=? AND status='running'").run(run.id);this.insertEvent(run.id,'run.recovered',{status:'paused',activeElapsedMs:run.active_elapsed_ms},now);})();}}
 }

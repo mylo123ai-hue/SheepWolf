@@ -6,4 +6,4 @@
 - Use the existing React/TypeScript, Fastify and SQLite architecture unless a verified limitation requires a change.
 - Keep scenario behavior server-authoritative. Preserve run configuration and accepted actions once the engine is added.
 - Update implementation progress with verified status and the next work block.
-- Continue from the latest verified commit and preserve working functionality. The next assignment is Block 4 as described in `docs/AI_HANDOFF.md`; do not repeat Blocks 1–3 or start later blocks early.
+- Continue from the latest verified commit and preserve working functionality. The next assignment is Block 5 as described in `docs/AI_HANDOFF.md`; do not repeat Blocks 1–4 or start later blocks early.

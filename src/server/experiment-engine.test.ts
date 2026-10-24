@@ -81,7 +81,7 @@ describe('shared autonomous experiment engine',()=>{
     expect(engine.getEvents(run.id).map(event=>event.type)).toEqual(['flags.initialized','run.started','run.paused','agent.decision']);
   });
   it('initializes exactly five unique safe flags, one per Sheep, and hides other custodians from Sheep contexts',()=>{
-    const {db,engine}=fixture();const run=engine.createExperiment({scenarioId,seed:'inventory'});const state=engine.getExperiment(run.id).scenarioState!;
+    const {db,engine}=fixture();const run=engine.createExperiment({scenarioId,seed:'inventory'});const state=engine.getCaptureTheFlagsState(run.id);
     const sheep=run.participants.filter(p=>p.role==='sheep').map(p=>p.characterId).sort();
     expect(state.flags).toHaveLength(5);expect(new Set(state.flags.map(f=>f.flagId)).size).toBe(5);expect(state.safeCount).toBe(5);expect(state.capturedCount).toBe(0);
     expect(state.flags.map(f=>f.originalOwnerId).sort()).toEqual(sheep);expect(state.flags.every(f=>f.custodianId===f.originalOwnerId&&f.status==='safe')).toBe(true);
@@ -135,9 +135,9 @@ describe('shared autonomous experiment engine',()=>{
     const {db,engine}=fixture({provider});const run=engine.createExperiment({scenarioId,seed});engine.pause(run.id);
     for(let i=0;i<30&&engine.getExperiment(run.id).status==='paused';i++)engine.step(run.id);
     const finished=engine.getExperiment(run.id);expect(finished).toMatchObject({status:'completed',outcome:{kind:'victory',team:'wolves',reason:'three_flags_captured',capturedCount:3,safeCount:2}});
-    expect(new Set(finished.scenarioState?.transfers.map(t=>t.flagId)).size).toBe(3);expect(finished.scenarioState?.flags.filter(f=>f.status==='captured')).toHaveLength(3);
-    const n=db.prepare('SELECT count(*) AS n FROM agent_decisions WHERE experiment_id=?').get(run.id) as {n:number};const transfersBefore=finished.scenarioState!.transfers.length;
-    expect(finished.scenarioState?.flags.find(f=>f.flagId===capturedFlag)).toMatchObject({status:'captured',capturedBy:wolf});expect(n.n).toBe(finished.decisionCount);expect(transfersBefore).toBe(3);
+    const state=engine.getCaptureTheFlagsState(run.id);expect(new Set(state.transfers.map(t=>t.flagId)).size).toBe(3);expect(state.flags.filter(f=>f.status==='captured')).toHaveLength(3);
+    const n=db.prepare('SELECT count(*) AS n FROM agent_decisions WHERE experiment_id=?').get(run.id) as {n:number};const transfersBefore=state.transfers.length;
+    expect(state.flags.find(f=>f.flagId===capturedFlag)).toMatchObject({status:'captured',capturedBy:wolf});expect(n.n).toBe(finished.decisionCount);expect(transfersBefore).toBe(3);
     expect(db.prepare('SELECT count(*) AS n FROM experiment_events WHERE experiment_id=? AND event_type=\'flag.captured\'').get(run.id)).toMatchObject({n:3});
   });
   it('can produce a complete Wolf victory through the default no-cost simulated agents',()=>{
@@ -159,5 +159,118 @@ describe('shared autonomous experiment engine',()=>{
     const seed='flag-recovery';const wolf=[...assignRoles(seed)].find(([,role])=>role==='wolf')![0];const provider:DecisionProvider={decide:context=>{const flag=context.knownFlags.find(f=>f.status==='safe'&&f.custodianId===context.characterId);return context.role==='sheep'&&flag?{type:'transfer_flag',flagId:flag.flagId,targetCharacterId:wolf}:{type:'silence'};}};
     const db=openDatabase(':memory:');databases.push(db);const first=new ExperimentEngine(db,{autoSchedule:false,provider});engines.push(first);const run=first.createExperiment({scenarioId,seed});first.pause(run.id);for(let i=0;i<7&&first.getCaptureTheFlagsState(run.id).transfers.length===0;i++)first.step(run.id);const before=first.getCaptureTheFlagsState(run.id);const decisions=first.getExperiment(run.id).decisionCount;expect(before.capturedCount).toBe(1);first.resume(run.id);first.close();
     const recovered=new ExperimentEngine(db,{autoSchedule:false,recoverOnStart:true});engines.push(recovered);expect(recovered.getExperiment(run.id)).toMatchObject({status:'paused',decisionCount:decisions});expect(recovered.getCaptureTheFlagsState(run.id)).toEqual(before);expect(recovered.getEvents(run.id).some(e=>e.type==='run.recovered')).toBe(true);
+  });
+});
+
+describe('The Investigation scenario',()=>{
+  const investigationId='the-investigation';
+  const runToVerdict=(fixtureData:ReturnType<typeof fixture>,seed:string,verdicts:Record<string,string>,maxDecisions=100)=>{
+    const provider:DecisionProvider={decide:context=>{
+      if(context.investigation?.phase==='voting')return {type:'submit_verdict',conclusionId:verdicts[context.characterId]??'no-theft'};
+      if(context.proposalOpen)return {type:'ending_vote',vote:context.role==='sheep'?'agree':'disagree'};
+      if(context.endingAvailable)return {type:'propose_ending',body:'I think we have compared the clues enough to form our own verdicts.'};
+      return {type:'silence'};
+    }};
+    const engine=new ExperimentEngine(fixtureData.db,{autoSchedule:false,provider});engines.push(engine);
+    const run=engine.createExperiment({scenarioId:investigationId,seed,maxDecisions});engine.pause(run.id);
+    for(let i=0;i<maxDecisions&&engine.getExperiment(run.id).status==='paused';i++)engine.step(run.id);
+    return {engine,run:engine.getExperiment(run.id)};
+  };
+
+  it('persists a fictional case and private per-run opinions while isolating answer and Wolf target',()=>{
+    const {db,engine}=fixture();const run=engine.createExperiment({scenarioId:investigationId,seed:'case-privacy'});const state=engine.getInvestigationState(run.id);
+    expect(state).toMatchObject({kind:'the-investigation',version:'archive-1',phase:'discussion',correctConclusionId:'no-theft',wolfTargetId:'mara-key'});
+    expect(state.evidence).toHaveLength(5);expect(state.opinions).toHaveLength(7);expect(state.opinions.filter(o=>o.role==='sheep')).toHaveLength(5);
+    const sheep=run.participants.find(p=>p.role==='sheep')!;const wolf=run.participants.find(p=>p.role==='wolf')!;
+    const sheepContext=participantContext(db,run.id,sheep.characterId);expect(sheepContext.investigation?.currentOpinionId).toBe(state.opinions.find(o=>o.characterId===sheep.characterId)?.currentConclusionId);
+    expect(sheepContext.investigation).not.toHaveProperty('correctConclusionId');expect(sheepContext.investigation).not.toHaveProperty('wolfTargetId');expect(sheepContext.privateObjective).not.toContain('Mara');
+    const wolfContext=participantContext(db,run.id,wolf.characterId);expect(wolfContext.privateObjective).toContain('Mara used the checked-out key');expect(wolfContext.investigation).not.toHaveProperty('correctConclusionId');
+    expect(engine.getPublicExperiment(run.id)).not.toHaveProperty('scenarioState');expect(engine.getEvents(run.id,0,false).some(e=>e.type==='investigation.initial_opinion')).toBe(false);
+    expect(db.prepare('SELECT count(*) AS n FROM investigation_opinions WHERE experiment_id=?').get(run.id)).toMatchObject({n:7});
+  });
+
+  it('lets Sheep privately change a valid opinion and records an ordered private event',()=>{
+    const {db,engine}=fixture();const provider:DecisionProvider={decide:context=>context.role==='sheep'&&context.investigation?.phase==='discussion'?{type:'change_opinion',conclusionId:context.investigation.conclusions.find(c=>c.id!==context.investigation?.currentOpinionId)!.id}:{type:'silence'}};
+    const testEngine=new ExperimentEngine(db,{autoSchedule:false,provider});engines.push(testEngine);const run=testEngine.createExperiment({scenarioId:investigationId,seed:'change-opinion'});testEngine.pause(run.id);
+    for(let i=0;i<10&&testEngine.getInvestigationState(run.id).opinionChanges.length===0;i++)testEngine.step(run.id);
+    const state=testEngine.getInvestigationState(run.id);expect(state.opinionChanges).toHaveLength(1);expect(state.opinions.find(o=>o.characterId===state.opinionChanges[0]?.characterId)?.changed).toBe(true);
+    expect(testEngine.getEvents(run.id).some(e=>e.type==='investigation.opinion_changed')).toBe(true);expect(testEngine.getEvents(run.id,0,false).some(e=>e.type==='investigation.opinion_changed')).toBe(false);
+    expect(db.prepare('SELECT count(*) AS n FROM investigation_opinion_changes WHERE experiment_id=?').get(run.id)).toMatchObject({n:1});
+  });
+
+  it('rejects invalid opinion and final verdict conclusion IDs without partial writes',()=>{
+    const {db,engine}=fixture();const badProvider:DecisionProvider={decide:context=>context.role==='sheep'?{type:'change_opinion',conclusionId:'outside-case'}:{type:'silence'}};
+    const testEngine=new ExperimentEngine(db,{autoSchedule:false,provider:badProvider});engines.push(testEngine);const run=testEngine.createExperiment({scenarioId:investigationId,seed:'invalid-opinion'});testEngine.pause(run.id);
+    let message='';for(let i=0;i<10&&!message;i++){try{testEngine.step(run.id);}catch(error){message=String(error);}}
+    expect(message).toContain('valid conclusion');expect(testEngine.getExperiment(run.id).decisionCount).toBe(0);expect(testEngine.getInvestigationState(run.id).opinionChanges).toHaveLength(0);
+  });
+
+  it('rejects invalid and duplicate final votes at the persistence boundary',()=>{
+    const {db,engine}=fixture({provider:{decide:()=>({type:'submit_verdict',conclusionId:'forged-answer'})}});const run=engine.createExperiment({scenarioId:investigationId,seed:'invalid-verdict'});engine.pause(run.id);db.prepare("UPDATE investigation_runs SET phase='voting' WHERE experiment_id=?").run(run.id);
+    let message='';for(let i=0;i<7&&!message;i++){try{engine.step(run.id);}catch(error){message=String(error);}}
+    expect(message).toContain('valid conclusion');expect(engine.getExperiment(run.id).decisionCount).toBe(0);expect(db.prepare('SELECT count(*) AS n FROM investigation_votes WHERE experiment_id=?').get(run.id)).toMatchObject({n:0});
+    const sheep=run.participants.find(p=>p.role==='sheep')!;const now=new Date().toISOString();db.prepare('INSERT INTO investigation_votes (experiment_id,character_id,conclusion_id,created_at) VALUES (?,?,?,?)').run(run.id,sheep.characterId,'no-theft',now);
+    expect(()=>db.prepare('INSERT INTO investigation_votes (experiment_id,character_id,conclusion_id,created_at) VALUES (?,?,?,?)').run(run.id,sheep.characterId,'mara-key',now)).toThrow();
+  });
+
+  it('collects five private Sheep votes and awards a Sheep victory for three correct conclusions',()=>{
+    const {db,engine}=fixture();const seed='investigation-sheep-win';const roles=assignRoles(seed);const sheep=[...roles].filter(([,role])=>role==='sheep').map(([id])=>id);const verdicts=Object.fromEntries(sheep.map(id=>[id,'no-theft']));
+    const result=runToVerdict({db,engine},seed,verdicts);expect(result.run).toMatchObject({status:'completed',outcome:{kind:'victory',team:'sheep',correctCount:5,votesCast:5}});
+    expect(result.run.scenarioState).toMatchObject({kind:'the-investigation',phase:'completed',missingSheepVotes:[]});expect(db.prepare("SELECT count(*) AS n FROM investigation_votes v JOIN experiment_participants p ON p.experiment_id=v.experiment_id AND p.character_id=v.character_id WHERE v.experiment_id=? AND p.role='sheep'").get(result.run.id)).toMatchObject({n:5});
+    const eventSequences=result.engine.getEvents(result.run.id).map(e=>e.sequence);expect(eventSequences).toEqual([...eventSequences].sort((a,b)=>a-b));
+    expect(result.engine.getEvents(result.run.id,0,false).some(e=>e.type==='investigation.vote_recorded')).toBe(false);
+  });
+
+  it('awards Wolf victory only when three Sheep choose the target; Wolf votes cannot affect scoring',()=>{
+    const {db,engine}=fixture();const seed='investigation-wolf-win';const roles=assignRoles(seed);const sheep=[...roles].filter(([,role])=>role==='sheep').map(([id])=>id);const verdicts=Object.fromEntries(sheep.map((id,index)=>[id,index<3?'mara-key':'elian-service-door']));
+    const result=runToVerdict({db,engine},seed,verdicts);expect(result.run.outcome).toMatchObject({kind:'victory',team:'wolves',targetCount:3,correctCount:0});
+    const wolf=[...roles].find(([,role])=>role==='wolf')![0];db.prepare('INSERT INTO investigation_votes (experiment_id,character_id,conclusion_id,created_at) VALUES (?,?,?,?)').run(result.run.id,wolf,'mara-key',new Date().toISOString());
+    expect(engine.getInvestigationState(result.run.id).voteTally.find(v=>v.conclusionId==='mara-key')?.count).toBe(3);expect(engine.getExperiment(result.run.id).outcome).toMatchObject({team:'wolves',targetCount:3});
+  });
+
+  it('returns an inconclusive result when neither threshold is reached',()=>{
+    const {db,engine}=fixture();const seed='investigation-inconclusive';const roles=assignRoles(seed);const sheep=[...roles].filter(([,role])=>role==='sheep').map(([id])=>id);const verdicts=Object.fromEntries(sheep.map((id,index)=>[id,index<2?'no-theft':index<4?'mara-key':'ivo-wax-parcel']));
+    const result=runToVerdict({db,engine},seed,verdicts);expect(result.run).toMatchObject({status:'completed',outcome:{kind:'inconclusive',correctCount:2,targetCount:2,votesCast:5}});
+  });
+
+  it('keeps missing votes explicitly incomplete when decision budget cannot fit finalization',()=>{
+    const {db,engine}=fixture({provider:new FixedProvider({type:'silence'})});const run=engine.createExperiment({scenarioId:investigationId,seed:'short-budget',maxDecisions:3});engine.pause(run.id);engine.step(run.id);
+    expect(engine.getExperiment(run.id)).toMatchObject({status:'incomplete_finalization',outcome:{kind:'incomplete',reason:'decision_limit',missingSheepVotes:expect.arrayContaining(['brook','clover','fern','moss','rowan'])}});
+    expect(engine.getInvestigationState(run.id).phase).toBe('incomplete');expect(db.prepare('SELECT count(*) AS n FROM investigation_votes WHERE experiment_id=?').get(run.id)).toMatchObject({n:0});
+  });
+
+  it('never scores an administrator stop or provider failure as a scenario victory',()=>{
+    let time=20_000;const {engine}=fixture({now:()=>time,provider:{decide:()=>{throw new Error('simulated provider failure');}}});
+    const stopped=engine.createExperiment({scenarioId:investigationId,seed:'investigation-stop'});engine.stop(stopped.id);expect(engine.getExperiment(stopped.id)).toMatchObject({status:'stopped',outcome:null});
+    const failed=engine.createExperiment({scenarioId:investigationId,seed:'investigation-failure',paceMs:100});time+=100;engine.tick();expect(engine.getExperiment(failed.id)).toMatchObject({status:'failed',outcome:null});
+  });
+
+  it('reserves the final five decisions for verdicts at the decision limit',()=>{
+    const {db,engine}=fixture();const seed='reserved-votes';const roles=assignRoles(seed);const verdicts=Object.fromEntries([...roles].filter(([,role])=>role==='sheep').map(([id])=>[id,'no-theft']));
+    const result=runToVerdict({db,engine},seed,verdicts,5);expect(result.run).toMatchObject({status:'completed',decisionCount:5,outcome:{kind:'victory',team:'sheep',votesCast:5}});
+  });
+
+  it('starts voting at the active-time limit and pauses the clock while final verdicts are collected',()=>{
+    let time=10_000;const {db,engine}=fixture({now:()=>time,provider:new FixedProvider({type:'silence'})});const run=engine.createExperiment({scenarioId:investigationId,seed:'time-finalization',maxDurationMs:1_000});time+=1_100;engine.tick();
+    expect(engine.getInvestigationState(run.id).phase).toBe('voting');const elapsed=engine.getExperiment(run.id).activeElapsedMs;time+=60_000;expect(engine.getExperiment(run.id).activeElapsedMs).toBe(elapsed);
+    engine.pause(run.id);const voter:DecisionProvider={decide:context=>context.investigation?.phase==='voting'?{type:'submit_verdict',conclusionId:'no-theft'}:{type:'silence'}};const votingEngine=new ExperimentEngine(db,{autoSchedule:false,provider:voter});engines.push(votingEngine);for(let i=0;i<5;i++)votingEngine.step(run.id);
+    expect(votingEngine.getExperiment(run.id).outcome).toMatchObject({kind:'victory',team:'sheep',reason:'active_time_limit'});
+  });
+
+  it('recovers investigation opinions, vote phase and private state after an engine restart',()=>{
+    const db=openDatabase(':memory:');databases.push(db);const provider:DecisionProvider={decide:context=>context.role==='sheep'&&context.investigation?.phase==='discussion'?{type:'change_opinion',conclusionId:context.investigation.conclusions.find(c=>c.id!==context.investigation?.currentOpinionId)!.id}:{type:'silence'}};const first=new ExperimentEngine(db,{autoSchedule:false,provider});engines.push(first);const run=first.createExperiment({scenarioId:investigationId,seed:'investigation-recovery'});first.pause(run.id);
+    for(let i=0;i<10&&first.getInvestigationState(run.id).opinionChanges.length===0;i++)first.step(run.id);const change=first.getInvestigationState(run.id).opinionChanges[0]!;const sheep=run.participants.find(p=>p.characterId===change.characterId)!;const revised=participantContext(db,run.id,sheep.characterId).investigation!.currentOpinionId;expect(first.getInvestigationState(run.id).opinionChanges).toHaveLength(1);
+    db.prepare("UPDATE investigation_runs SET phase='voting',finalization_reason='sheep_consensus' WHERE experiment_id=?").run(run.id);first.resume(run.id);first.close();
+    const recovered=new ExperimentEngine(db,{autoSchedule:false,recoverOnStart:true});engines.push(recovered);expect(recovered.getExperiment(run.id).status).toBe('paused');expect(recovered.getInvestigationState(run.id)).toMatchObject({phase:'voting',finalizationReason:'sheep_consensus',opinionChanges:[{toConclusionId:revised}]});expect(participantContext(db,run.id,sheep.characterId).investigation?.currentOpinionId).toBe(revised);
+  });
+
+  it('runs a complete no-cost Investigation demo through discussion, opinion changes and private verdicts',()=>{
+    const {db,engine}=fixture();const run=engine.createExperiment({scenarioId:investigationId,seed:'opinion-demo-13',maxDecisions:100});engine.pause(run.id);
+    for(let i=0;i<100&&engine.getExperiment(run.id).status==='paused';i++)engine.step(run.id);
+    const finished=engine.getExperiment(run.id);const state=engine.getInvestigationState(run.id);
+    expect(finished.status).toBe('completed');expect(state.phase).toBe('completed');expect(state.votes).toHaveLength(5);expect(finished.postCount+finished.replyCount).toBeGreaterThan(0);expect(state.opinionChanges.length).toBeGreaterThan(0);
+    expect(db.prepare('SELECT count(*) AS n FROM investigation_opinion_changes WHERE experiment_id=?').get(run.id)).toMatchObject({n:state.opinionChanges.length});
+    expect(engine.getForumRows(run.id).some(post=>post.body.includes('Brackenmere')||post.body.includes('register')||post.body.includes('wax'))).toBe(true);
+    expect(engine.getEvents(run.id,0,false).some(event=>event.type==='investigation.vote_recorded'||event.type==='investigation.opinion_changed')).toBe(false);
   });
 });
