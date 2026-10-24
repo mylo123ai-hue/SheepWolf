@@ -24,9 +24,9 @@ export interface ProviderUsageSnapshot {
   requests:number; inputTokens:number; outputTokens:number; estimatedUsd:number;
   limits:ProviderRunLimits; model:string;
 }
-export interface ExperimentParticipant { characterId:string;name:string;personality:string;role:'sheep'|'wolf';privateObjective:string;actionOpportunities:number;endingVote:'agree'|'disagree'|null;lastDecisionAt:string|null;recentAction:string|null; }
+export interface ExperimentParticipant { characterId:string;name:string;personality:string;color:string;initials:string;role:'sheep'|'wolf';privateObjective:string;actionOpportunities:number;endingVote:'agree'|'disagree'|null;lastDecisionAt:string|null;recentAction:string|null; }
 export interface ExperimentSnapshot {
-  id:string;scenarioId:string;status:ExperimentStatus;config:RunConfig;roleSeed:string;createdAt:string;startedAt:string;endedAt:string|null;
+  id:string;scenarioId:string;scenarioVersion:string;status:ExperimentStatus;config:RunConfig;roleSeed:string;createdAt:string;startedAt:string;endedAt:string|null;
   activeElapsedMs:number;decisionCount:number;outcome:unknown;stopReason:string|null;participants:ExperimentParticipant[];postCount:number;replyCount:number;
   recentDecisions:{sequence:number;characterId:string;actionType:string;createdAt:string;summary:string}[];scenarioState:CaptureTheFlagsState|InvestigationState|null;providerUsage:ProviderUsageSnapshot|null;
 }

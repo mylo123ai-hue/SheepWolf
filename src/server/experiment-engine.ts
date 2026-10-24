@@ -32,20 +32,26 @@ export type ProviderDecision=AgentAction|ProviderActionResult;
 export interface DecisionProvider { decide(context: AgentContext, options?:ProviderExecutionOptions): ProviderDecision|Promise<ProviderDecision>; }
 export interface EngineOptions { provider?: DecisionProvider; realProvider?:DecisionProvider; autoSchedule?: boolean; recoverOnStart?: boolean; now?: () => number; }
 class ProviderBudgetError extends Error {constructor(readonly code:string){super('Real AI usage limit reached before the next request.');}}
-export interface ExperimentParticipant { characterId:string; name:string; personality:string; role:Role; privateObjective:string; actionOpportunities:number; endingVote:'agree'|'disagree'|null; lastDecisionAt:string|null; recentAction:string|null; }
+export interface ExperimentParticipant { characterId:string; name:string; personality:string; color:string; initials:string; role:Role; privateObjective:string; actionOpportunities:number; endingVote:'agree'|'disagree'|null; lastDecisionAt:string|null; recentAction:string|null; }
 export interface FlagRecord {flagId:string;originalOwnerId:string;originalOwnerName:string;custodianId:string;custodianName:string;status:'safe'|'captured';capturedBy:string|null;capturedByName:string|null;transferredAt:string|null;}
 export interface FlagTransfer {id:number;flagId:string;originalOwnerId:string;originalOwnerName:string;fromCharacterId:string;fromName:string;toCharacterId:string;toName:string;captured:boolean;createdAt:string;visibleTo:string[];}
 export interface CaptureTheFlagsState {kind:'capture-the-flags';flags:FlagRecord[];transfers:FlagTransfer[];safeCount:number;capturedCount:number;}
 export interface InvestigationState {kind:'the-investigation';version:string;phase:'discussion'|'voting'|'completed'|'incomplete';finalizationReason:string|null;title:string;mystery:string;evidence:string[];conclusions:{id:string;label:string;description:string}[];correctConclusionId:string;wolfTargetId:string;opinions:{characterId:string;characterName:string;role:Role;initialConclusionId:string;currentConclusionId:string;finalConclusionId:string|null;changed:boolean}[];opinionChanges:{sequence:number;characterId:string;fromConclusionId:string;toConclusionId:string;createdAt:string}[];votes:{characterId:string;conclusionId:string;createdAt:string}[];voteTally:{conclusionId:string;count:number}[];missingSheepVotes:string[];}
 export interface ExperimentSnapshot {
-  id:string; scenarioId:string; status:RunStatus; config:RunConfig; roleSeed:string;
+  id:string; scenarioId:string; scenarioVersion:string; status:RunStatus; config:RunConfig; roleSeed:string;
   createdAt:string; startedAt:string; endedAt:string|null; activeElapsedMs:number; decisionCount:number;
   outcome:unknown; stopReason:string|null; participants:ExperimentParticipant[];
   postCount:number; replyCount:number; recentDecisions:{sequence:number;characterId:string;actionType:ActionType;createdAt:string;summary:string}[];scenarioState:CaptureTheFlagsState|InvestigationState|null;providerUsage:ProviderUsageSnapshot|null;
 }
 export interface PublicExperimentSnapshot { id:string;scenarioId:string;status:RunStatus;createdAt:string;startedAt:string;endedAt:string|null;activeElapsedMs:number;decisionCount:number;postCount:number;replyCount:number; }
 export interface ExperimentEvent { id:number; experimentId:string; sequence:number; type:string; payload:Record<string,unknown>; createdAt:string; audience:'public'|'observer'|'selected'; visibleTo:string[]; }
-type InternalRun = {id:string;scenario_id:string;status:RunStatus;config_json:string;role_seed:string;created_at:string;started_at:string;resumed_at:string|null;ended_at:string|null;active_elapsed_ms:number;decision_count:number;ending_proposed_at:string|null;ending_proposed_by:string|null;outcome_json:string|null;stop_reason:string|null;control_version:number};
+export interface ExperimentHistorySummary { snapshot:ExperimentSnapshot; eventCount:number; }
+export interface ExperimentHistoryDetail extends ExperimentHistorySummary {
+  events:ExperimentEvent[];
+  forum:PostRow[];
+  decisions:{sequence:number;characterId:string;actionType:ActionType;createdAt:string;result:unknown}[];
+}
+type InternalRun = {id:string;scenario_id:string;scenario_version:string;status:RunStatus;config_json:string;role_seed:string;created_at:string;started_at:string;resumed_at:string|null;ended_at:string|null;active_elapsed_ms:number;decision_count:number;ending_proposed_at:string|null;ending_proposed_by:string|null;outcome_json:string|null;stop_reason:string|null;control_version:number};
 type ParticipantRow = {character_id:string;name:string;personality:string;role:Role;private_objective:string;memory_json:string;action_opportunities:number;ending_vote:'agree'|'disagree'|null;last_decision_at:string|null;recent_action:string|null};
 type PostRow = {id:number;scenario_id:string;parent_id:number|null;author_id:string;title:string|null;body:string;created_at:string};
 type FlagRow = {experiment_id:string;flag_id:string;original_owner_id:string;custodian_id:string;status:'safe'|'captured';captured_by:string|null;transferred_at:string|null;original_owner_name:string;custodian_name:string;captured_by_name:string|null};
@@ -67,14 +73,14 @@ export function assignRoles(seed:string):Map<string,Role> {
 
 export function participantContext(db:Database.Database,experimentId:string,characterId:string,random=0.5):AgentContext {
   const row=db.prepare(`SELECT p.character_id,p.role,p.private_objective,p.memory_json,p.action_opportunities,
-      c.name,c.personality,e.scenario_id,e.decision_count,e.ending_proposed_at,e.role_seed
+      coalesce(nullif(p.name_snapshot,''),c.name) AS name,coalesce(nullif(p.personality_snapshot,''),c.personality) AS personality,e.scenario_id,e.decision_count,e.ending_proposed_at,e.role_seed
     FROM experiment_participants p JOIN characters c ON c.id=p.character_id JOIN experiments e ON e.id=p.experiment_id
     WHERE p.experiment_id=? AND p.character_id=?`).get(experimentId,characterId) as (ParticipantRow&{scenario_id:string;decision_count:number;ending_proposed_at:string|null;role_seed:string})|undefined;
   if(!row) throw new Error('Participant not found in experiment');
   const teammates=row.role==='wolf'?(db.prepare("SELECT character_id FROM experiment_participants WHERE experiment_id=? AND role='wolf' AND character_id<>? ORDER BY character_id").all(experimentId,characterId) as {character_id:string}[]).map(p=>p.character_id):[];
-  const recentMessages=db.prepare(`SELECT f.id,f.author_id,c.name AS author_name,f.title,f.body FROM forum_posts f JOIN characters c ON c.id=f.author_id
+  const recentMessages=db.prepare(`SELECT f.id,f.author_id,coalesce(nullif(ap.name_snapshot,''),c.name) AS author_name,f.title,f.body FROM forum_posts f JOIN experiment_participants ap ON ap.experiment_id=f.experiment_id AND ap.character_id=f.author_id JOIN characters c ON c.id=f.author_id
     WHERE f.experiment_id=? ORDER BY f.id DESC LIMIT 12`).all(experimentId) as {id:number;author_id:string;author_name:string;title:string|null;body:string}[];
-  const otherParticipants=db.prepare(`SELECT p.character_id AS id,c.name FROM experiment_participants p JOIN characters c ON c.id=p.character_id
+  const otherParticipants=db.prepare(`SELECT p.character_id AS id,coalesce(nullif(p.name_snapshot,''),c.name) AS name FROM experiment_participants p JOIN characters c ON c.id=p.character_id
     WHERE p.experiment_id=? AND p.character_id<>? ORDER BY p.character_id`).all(experimentId,characterId) as {id:string;name:string}[];
   const knownFlags=row.scenario_id==='capture-the-flags'?(db.prepare(`SELECT flag_id,original_owner_id,custodian_id,status,captured_by FROM capture_flags
     WHERE experiment_id=? AND (original_owner_id=? OR custodian_id=?) ORDER BY flag_id`).all(experimentId,characterId,characterId) as {flag_id:string;original_owner_id:string;custodian_id:string;status:'safe'|'captured';captured_by:string|null}[]).map(f=>({flagId:f.flag_id,originalOwnerId:f.original_owner_id,custodianId:f.custodian_id,status:f.status,capturedBy:f.captured_by})):[];
@@ -184,11 +190,12 @@ export class ExperimentEngine {
     const seed=input.seed??randomUUID();const roles=assignRoles(seed);const id=randomUUID();const now=new Date(this.now()).toISOString();
     const events:ExperimentEvent[]=[];
     this.db.transaction(()=>{
-      this.db.prepare(`INSERT INTO experiments (id,scenario_id,status,config_json,role_seed,created_at,started_at,resumed_at)
-        VALUES (?,?, 'running', ?, ?, ?, ?, ?)`).run(id,input.scenarioId,JSON.stringify(config),seed,now,now,now);
-      const insert=this.db.prepare(`INSERT INTO experiment_participants (experiment_id,character_id,role,private_objective,memory_json)
-        VALUES (?,?,?,?, '[]')`);
-      for(const character of characters){const role=roles.get(character.id)!;const objective=input.scenarioId==='capture-the-flags'?(role==='sheep'?flagSheepObjective:flagWolfObjective):input.scenarioId==='the-investigation'?(role==='sheep'?investigationSheepObjective:investigationWolfObjective):(role==='sheep'?sheepObjective:wolfObjective);insert.run(id,character.id,role,objective);}
+      const scenarioVersion=input.scenarioId==='capture-the-flags'?'flags-1':input.scenarioId==='the-investigation'?investigationCase.version:'1';
+      this.db.prepare(`INSERT INTO experiments (id,scenario_id,scenario_version,status,config_json,role_seed,created_at,started_at,resumed_at)
+        VALUES (?,?,?, 'running', ?, ?, ?, ?, ?)`).run(id,input.scenarioId,scenarioVersion,JSON.stringify(config),seed,now,now,now);
+      const insert=this.db.prepare(`INSERT INTO experiment_participants (experiment_id,character_id,role,private_objective,memory_json,name_snapshot,personality_snapshot,color_snapshot,initials_snapshot)
+        VALUES (?,?,?,?, '[]',?,?,?,?)`);
+      for(const character of characters){const role=roles.get(character.id)!;const objective=input.scenarioId==='capture-the-flags'?(role==='sheep'?flagSheepObjective:flagWolfObjective):input.scenarioId==='the-investigation'?(role==='sheep'?investigationSheepObjective:investigationWolfObjective):(role==='sheep'?sheepObjective:wolfObjective);insert.run(id,character.id,role,objective,character.name,character.personality,character.color,character.initials);}
       if(input.scenarioId==='capture-the-flags'){
         const flag=this.db.prepare("INSERT INTO capture_flags (experiment_id,flag_id,original_owner_id,custodian_id,status) VALUES (?,?,?,?,'safe')");
         for(const character of characters)if(roles.get(character.id)==='sheep')flag.run(id,`flag-${character.id}`,character.id,character.id);
@@ -208,13 +215,24 @@ export class ExperimentEngine {
   getCurrent():ExperimentSnapshot|null {const row=this.db.prepare("SELECT id FROM experiments ORDER BY CASE WHEN status IN ('running','paused') THEN 0 ELSE 1 END, created_at DESC LIMIT 1").get() as {id:string}|undefined;return row?this.getExperiment(row.id):null;}
   getExperiment(id:string):ExperimentSnapshot {
     const run=this.db.prepare('SELECT * FROM experiments WHERE id=?').get(id) as InternalRun|undefined;if(!run)throw new Error('Experiment not found.');
-    const participantRows=this.db.prepare(`SELECT p.character_id,c.name,c.personality,p.role,p.private_objective,p.action_opportunities,p.ending_vote,p.last_decision_at,p.recent_action
-      FROM experiment_participants p JOIN characters c ON c.id=p.character_id WHERE p.experiment_id=? ORDER BY c.name`).all(id) as {character_id:string;name:string;personality:string;role:Role;private_objective:string;action_opportunities:number;ending_vote:'agree'|'disagree'|null;last_decision_at:string|null;recent_action:string|null}[];
-    const participants:ExperimentParticipant[]=participantRows.map(p=>({characterId:p.character_id,name:p.name,personality:p.personality,role:p.role,privateObjective:p.private_objective,actionOpportunities:p.action_opportunities,endingVote:p.ending_vote,lastDecisionAt:p.last_decision_at,recentAction:p.recent_action}));
-    const counts=this.db.prepare('SELECT count(*) AS posts, sum(CASE WHEN parent_id IS NOT NULL THEN 1 ELSE 0 END) AS replies FROM forum_posts WHERE experiment_id=?').get(id) as {posts:number;replies:number|null};
+    const participantRows=this.db.prepare(`SELECT p.character_id,coalesce(nullif(p.name_snapshot,''),c.name) AS name,coalesce(nullif(p.personality_snapshot,''),c.personality) AS personality,p.color_snapshot AS color,p.initials_snapshot AS initials,p.role,p.private_objective,p.action_opportunities,p.ending_vote,p.last_decision_at,p.recent_action
+      FROM experiment_participants p JOIN characters c ON c.id=p.character_id WHERE p.experiment_id=? ORDER BY name`).all(id) as {character_id:string;name:string;personality:string;color:string;initials:string;role:Role;private_objective:string;action_opportunities:number;ending_vote:'agree'|'disagree'|null;last_decision_at:string|null;recent_action:string|null}[];
+    const participants:ExperimentParticipant[]=participantRows.map(p=>({characterId:p.character_id,name:p.name,personality:p.personality,color:p.color,initials:p.initials,role:p.role,privateObjective:p.private_objective,actionOpportunities:p.action_opportunities,endingVote:p.ending_vote,lastDecisionAt:p.last_decision_at,recentAction:p.recent_action}));
+    const counts=this.db.prepare('SELECT sum(CASE WHEN parent_id IS NULL THEN 1 ELSE 0 END) AS posts,sum(CASE WHEN parent_id IS NOT NULL THEN 1 ELSE 0 END) AS replies FROM forum_posts WHERE experiment_id=?').get(id) as {posts:number|null;replies:number|null};
     const recent=this.db.prepare('SELECT sequence,character_id,action_type,created_at,result_json FROM agent_decisions WHERE experiment_id=? ORDER BY sequence DESC LIMIT 12').all(id) as {sequence:number;character_id:string;action_type:ActionType;created_at:string;result_json:string}[];
     const config=JSON.parse(run.config_json) as RunConfig;
-    return {id:run.id,scenarioId:run.scenario_id,status:run.status,config,roleSeed:run.role_seed,createdAt:run.created_at,startedAt:run.started_at,endedAt:run.ended_at,activeElapsedMs:this.elapsed(run),decisionCount:run.decision_count,outcome:run.outcome_json?JSON.parse(run.outcome_json):null,stopReason:run.stop_reason,participants,postCount:counts.posts,replyCount:counts.replies??0,recentDecisions:recent.reverse().map(d=>({sequence:d.sequence,characterId:d.character_id,actionType:d.action_type,createdAt:d.created_at,summary:(JSON.parse(d.result_json) as {summary:string}).summary})),scenarioState:run.scenario_id==='capture-the-flags'?this.getCaptureTheFlagsState(id):run.scenario_id==='the-investigation'?this.getInvestigationState(id):null,providerUsage:config.mode==='real'&&config.provider?this.getProviderUsage(id,config.provider.model,config.provider.limits):null};
+    return {id:run.id,scenarioId:run.scenario_id,scenarioVersion:run.scenario_version??'1',status:run.status,config,roleSeed:run.role_seed,createdAt:run.created_at,startedAt:run.started_at,endedAt:run.ended_at,activeElapsedMs:this.elapsed(run),decisionCount:run.decision_count,outcome:run.outcome_json?JSON.parse(run.outcome_json):null,stopReason:run.stop_reason,participants,postCount:counts.posts??0,replyCount:counts.replies??0,recentDecisions:recent.reverse().map(d=>({sequence:d.sequence,characterId:d.character_id,actionType:d.action_type,createdAt:d.created_at,summary:(JSON.parse(d.result_json) as {summary:string}).summary})),scenarioState:run.scenario_id==='capture-the-flags'?this.getCaptureTheFlagsState(id):run.scenario_id==='the-investigation'?this.getInvestigationState(id):null,providerUsage:config.mode==='real'&&config.provider?this.getProviderUsage(id,config.provider.model,config.provider.limits):null};
+  }
+  listHistory():ExperimentHistorySummary[] {
+    const runs=this.db.prepare('SELECT id FROM experiments ORDER BY created_at DESC,id DESC').all() as {id:string}[];
+    return runs.map(({id})=>({snapshot:this.getExperiment(id),eventCount:(this.db.prepare('SELECT count(*) AS count FROM experiment_events WHERE experiment_id=?').get(id) as {count:number}).count}));
+  }
+  getHistoryDetail(id:string):ExperimentHistoryDetail {
+    const snapshot=this.getExperiment(id);
+    const decisions=this.db.prepare('SELECT sequence,character_id,action_type,created_at,result_json FROM agent_decisions WHERE experiment_id=? ORDER BY sequence').all(id) as {sequence:number;character_id:string;action_type:ActionType;created_at:string;result_json:string}[];
+    return {snapshot,eventCount:(this.db.prepare('SELECT count(*) AS count FROM experiment_events WHERE experiment_id=?').get(id) as {count:number}).count,
+      events:this.getEvents(id,0,true),forum:this.getForumRows(id),
+      decisions:decisions.map(d=>({sequence:d.sequence,characterId:d.character_id,actionType:d.action_type,createdAt:d.created_at,result:JSON.parse(d.result_json)}))};
   }
   private validProviderLimits(limits:ProviderRunLimits){return Number.isInteger(limits.maxRequests)&&limits.maxRequests>=1&&limits.maxRequests<=500&&Number.isInteger(limits.maxInputTokens)&&limits.maxInputTokens>=1&&limits.maxInputTokens<=10_000_000&&Number.isInteger(limits.maxOutputTokens)&&limits.maxOutputTokens>=1&&limits.maxOutputTokens<=1_000_000&&Number.isInteger(limits.maxOutputTokensPerRequest)&&limits.maxOutputTokensPerRequest>=1&&limits.maxOutputTokensPerRequest<=8192&&limits.maxOutputTokensPerRequest<=limits.maxOutputTokens&&Number.isFinite(limits.maxEstimatedUsd)&&limits.maxEstimatedUsd>0&&limits.maxEstimatedUsd<=100;}
   private providerUsageTotals(id:string){
@@ -255,12 +273,14 @@ export class ExperimentEngine {
   }
   getCaptureTheFlagsState(id:string):CaptureTheFlagsState {
     if(!this.db.prepare("SELECT id FROM experiments WHERE id=? AND scenario_id='capture-the-flags'").get(id))throw new Error('Capture the Flags state is unavailable for this experiment.');
-    const flags=this.db.prepare(`SELECT f.*,o.name AS original_owner_name,c.name AS custodian_name,x.name AS captured_by_name
-      FROM capture_flags f JOIN characters o ON o.id=f.original_owner_id JOIN characters c ON c.id=f.custodian_id
-      LEFT JOIN characters x ON x.id=f.captured_by WHERE f.experiment_id=? ORDER BY f.flag_id`).all(id) as FlagRow[];
-    const transfers=this.db.prepare(`SELECT t.id,t.flag_id,t.from_character_id,t.to_character_id,t.captured,t.created_at,o.original_owner_id,src.name AS from_name,dst.name AS to_name
+    const flags=this.db.prepare(`SELECT f.*,coalesce(nullif(o.name_snapshot,''),oc.name) AS original_owner_name,coalesce(nullif(c.name_snapshot,''),cc.name) AS custodian_name,coalesce(nullif(x.name_snapshot,''),xc.name) AS captured_by_name
+      FROM capture_flags f JOIN experiment_participants o ON o.experiment_id=f.experiment_id AND o.character_id=f.original_owner_id JOIN characters oc ON oc.id=f.original_owner_id
+      JOIN experiment_participants c ON c.experiment_id=f.experiment_id AND c.character_id=f.custodian_id JOIN characters cc ON cc.id=f.custodian_id
+      LEFT JOIN experiment_participants x ON x.experiment_id=f.experiment_id AND x.character_id=f.captured_by LEFT JOIN characters xc ON xc.id=f.captured_by WHERE f.experiment_id=? ORDER BY f.flag_id`).all(id) as FlagRow[];
+    const transfers=this.db.prepare(`SELECT t.id,t.flag_id,t.from_character_id,t.to_character_id,t.captured,t.created_at,o.original_owner_id,coalesce(nullif(src.name_snapshot,''),sc.name) AS from_name,coalesce(nullif(dst.name_snapshot,''),dc.name) AS to_name
       FROM flag_transfers t JOIN capture_flags o ON o.experiment_id=t.experiment_id AND o.flag_id=t.flag_id
-      JOIN characters src ON src.id=t.from_character_id JOIN characters dst ON dst.id=t.to_character_id
+      JOIN experiment_participants src ON src.experiment_id=t.experiment_id AND src.character_id=t.from_character_id JOIN characters sc ON sc.id=t.from_character_id
+      JOIN experiment_participants dst ON dst.experiment_id=t.experiment_id AND dst.character_id=t.to_character_id JOIN characters dc ON dc.id=t.to_character_id
       WHERE t.experiment_id=? ORDER BY t.id`).all(id) as {id:number;flag_id:string;from_character_id:string;to_character_id:string;captured:number;created_at:string;original_owner_id:string;from_name:string;to_name:string}[];
     const flagRecords:FlagRecord[]=flags.map(f=>({flagId:f.flag_id,originalOwnerId:f.original_owner_id,originalOwnerName:f.original_owner_name,custodianId:f.custodian_id,custodianName:f.custodian_name,status:f.status,capturedBy:f.captured_by,capturedByName:f.captured_by_name,transferredAt:f.transferred_at}));
     const transferRecords:FlagTransfer[]=transfers.map(t=>({id:t.id,flagId:t.flag_id,originalOwnerId:t.original_owner_id,originalOwnerName:flags.find(f=>f.flag_id===t.flag_id)?.original_owner_name??'',fromCharacterId:t.from_character_id,fromName:t.from_name,toCharacterId:t.to_character_id,toName:t.to_name,captured:Boolean(t.captured),createdAt:t.created_at,visibleTo:[...new Set([t.original_owner_id,t.from_character_id,t.to_character_id])]}));
@@ -270,7 +290,7 @@ export class ExperimentEngine {
     const row=this.db.prepare('SELECT * FROM investigation_runs WHERE experiment_id=?').get(id) as {scenario_version:string;case_json:string;correct_conclusion_id:string;wolf_target_id:string;phase:InvestigationState['phase'];finalization_reason:string|null}|undefined;
     if(!row)throw new Error('Investigation state is unavailable for this experiment.');
     const caseSnapshot=JSON.parse(row.case_json) as typeof investigationCase;
-    const opinions=this.db.prepare(`SELECT o.character_id,c.name AS character_name,p.role,o.initial_conclusion_id,o.current_conclusion_id,o.final_conclusion_id FROM investigation_opinions o JOIN characters c ON c.id=o.character_id JOIN experiment_participants p ON p.experiment_id=o.experiment_id AND p.character_id=o.character_id WHERE o.experiment_id=? ORDER BY c.name`).all(id) as {character_id:string;character_name:string;role:Role;initial_conclusion_id:string;current_conclusion_id:string;final_conclusion_id:string|null}[];
+    const opinions=this.db.prepare(`SELECT o.character_id,coalesce(nullif(p.name_snapshot,''),c.name) AS character_name,p.role,o.initial_conclusion_id,o.current_conclusion_id,o.final_conclusion_id FROM investigation_opinions o JOIN characters c ON c.id=o.character_id JOIN experiment_participants p ON p.experiment_id=o.experiment_id AND p.character_id=o.character_id WHERE o.experiment_id=? ORDER BY character_name`).all(id) as {character_id:string;character_name:string;role:Role;initial_conclusion_id:string;current_conclusion_id:string;final_conclusion_id:string|null}[];
     const opinionChanges=this.db.prepare('SELECT sequence,character_id,from_conclusion_id,to_conclusion_id,created_at FROM investigation_opinion_changes WHERE experiment_id=? ORDER BY sequence').all(id) as {sequence:number;character_id:string;from_conclusion_id:string;to_conclusion_id:string;created_at:string}[];
     const votes=this.db.prepare('SELECT character_id,conclusion_id,created_at FROM investigation_votes WHERE experiment_id=? ORDER BY rowid').all(id) as {character_id:string;conclusion_id:string;created_at:string}[];
     const tally=this.db.prepare('SELECT conclusion_id,count(*) AS count FROM investigation_votes v JOIN experiment_participants p ON p.experiment_id=v.experiment_id AND p.character_id=v.character_id WHERE v.experiment_id=? AND p.role=\'sheep\' GROUP BY conclusion_id').all(id) as {conclusion_id:string;count:number}[];
@@ -279,12 +299,12 @@ export class ExperimentEngine {
   }
   getPublicExperiment(id:string):PublicExperimentSnapshot {
     const run=this.db.prepare('SELECT * FROM experiments WHERE id=?').get(id) as InternalRun|undefined;if(!run)throw new Error('Experiment not found.');
-    const counts=this.db.prepare('SELECT count(*) AS posts, sum(CASE WHEN parent_id IS NOT NULL THEN 1 ELSE 0 END) AS replies FROM forum_posts WHERE experiment_id=?').get(id) as {posts:number;replies:number|null};
-    return {id:run.id,scenarioId:run.scenario_id,status:run.status,createdAt:run.created_at,startedAt:run.started_at,endedAt:run.ended_at,activeElapsedMs:this.elapsed(run),decisionCount:run.decision_count,postCount:counts.posts,replyCount:counts.replies??0};
+    const counts=this.db.prepare('SELECT sum(CASE WHEN parent_id IS NULL THEN 1 ELSE 0 END) AS posts,sum(CASE WHEN parent_id IS NOT NULL THEN 1 ELSE 0 END) AS replies FROM forum_posts WHERE experiment_id=?').get(id) as {posts:number|null;replies:number|null};
+    return {id:run.id,scenarioId:run.scenario_id,status:run.status,createdAt:run.created_at,startedAt:run.started_at,endedAt:run.ended_at,activeElapsedMs:this.elapsed(run),decisionCount:run.decision_count,postCount:counts.posts??0,replyCount:counts.replies??0};
   }
   getEvents(id:string,after=0,observer=true):ExperimentEvent[] {
     if(!this.db.prepare('SELECT id FROM experiments WHERE id=?').get(id))throw new Error('Experiment not found.');
-    const rows=observer?this.db.prepare('SELECT id,experiment_id,sequence,event_type,payload_json,created_at,audience,visible_to_json FROM experiment_events WHERE experiment_id=? AND id>? ORDER BY id').all(id,after):this.db.prepare("SELECT id,experiment_id,sequence,event_type,payload_json,created_at,audience,visible_to_json FROM experiment_events WHERE experiment_id=? AND id>? AND audience='public' ORDER BY id").all(id,after);
+    const rows=observer?this.db.prepare('SELECT id,experiment_id,sequence,event_type,payload_json,created_at,audience,visible_to_json FROM experiment_events WHERE experiment_id=? AND id>? ORDER BY sequence').all(id,after):this.db.prepare("SELECT id,experiment_id,sequence,event_type,payload_json,created_at,audience,visible_to_json FROM experiment_events WHERE experiment_id=? AND id>? AND audience='public' ORDER BY sequence").all(id,after);
     return (rows as {id:number;experiment_id:string;sequence:number;event_type:string;payload_json:string;created_at:string;audience:'public'|'observer'|'selected';visible_to_json:string}[]).map(e=>({id:e.id,experimentId:e.experiment_id,sequence:e.sequence,type:e.event_type,payload:JSON.parse(e.payload_json),createdAt:e.created_at,audience:e.audience,visibleTo:JSON.parse(e.visible_to_json) as string[]}));
   }
   getForumRows(id:string):PostRow[] {if(!this.db.prepare('SELECT id FROM experiments WHERE id=?').get(id))throw new Error('Experiment not found.');return this.db.prepare('SELECT id,scenario_id,parent_id,author_id,title,body,created_at FROM forum_posts WHERE experiment_id=? ORDER BY id').all(id) as PostRow[];}
@@ -301,7 +321,7 @@ export class ExperimentEngine {
   private requireRun(id:string,...statuses:RunStatus[]):InternalRun {const run=this.db.prepare('SELECT * FROM experiments WHERE id=?').get(id) as InternalRun|undefined;if(!run)throw new Error('Experiment not found.');if(!statuses.includes(run.status))throw new Error(`Experiment is ${run.status}; this control is not available.`);return run;}
   async tick(){if(this.busy.size)return;const rows=this.db.prepare("SELECT * FROM experiments WHERE status='running' ORDER BY created_at").all() as InternalRun[];for(const run of rows){if(this.busy.size)break;const elapsed=this.elapsed(run);const config=JSON.parse(run.config_json) as RunConfig;const finalizing=run.scenario_id==='the-investigation'&&this.investigationPhase(run.id)==='voting';if(!finalizing&&elapsed>=config.maxDurationMs){this.completeAtLimit(run.id,'active_time_limit');continue;}if(!finalizing)this.db.prepare("UPDATE experiments SET active_elapsed_ms=?,resumed_at=? WHERE id=? AND status='running'").run(elapsed,new Date(this.now()).toISOString(),run.id);const last=this.db.prepare('SELECT created_at FROM agent_decisions WHERE experiment_id=? ORDER BY sequence DESC LIMIT 1').get(run.id) as {created_at:string}|undefined;const dueAt=last?Date.parse(last.created_at):Date.parse(run.started_at);if(this.now()-dueAt>=config.paceMs){await this.executeOne(run.id,false);break;}}}
   private chooseParticipant(runId:string,seed:string,sequence:number):ParticipantRow|undefined {
-    const rows=this.db.prepare(`SELECT p.character_id,p.role,p.private_objective,p.memory_json,p.action_opportunities,p.ending_vote,p.last_decision_at,p.recent_action,c.name,c.personality
+    const rows=this.db.prepare(`SELECT p.character_id,p.role,p.private_objective,p.memory_json,p.action_opportunities,p.ending_vote,p.last_decision_at,p.recent_action,coalesce(nullif(p.name_snapshot,''),c.name) AS name,coalesce(nullif(p.personality_snapshot,''),c.personality) AS personality
       FROM experiment_participants p JOIN characters c ON c.id=p.character_id WHERE p.experiment_id=?`).all(runId) as ParticipantRow[];
     const run=this.db.prepare('SELECT ending_proposed_at FROM experiments WHERE id=?').get(runId) as {ending_proposed_at:string|null};
     let eligible=run.ending_proposed_at?rows.filter(p=>p.ending_vote===null):rows;
@@ -437,7 +457,7 @@ export class ExperimentEngine {
       if(flag.status!=='safe')throw new Error('A captured flag cannot be transferred.');
       if(flag.custodian_id!==p.character_id)throw new Error('Only the current custodian can authorize this transfer.');
       if(action.targetCharacterId===p.character_id)throw new Error('Choose another participant to receive the flag.');
-      const target=this.db.prepare('SELECT p.character_id,p.role,c.name FROM experiment_participants p JOIN characters c ON c.id=p.character_id WHERE p.experiment_id=? AND p.character_id=?').get(id,action.targetCharacterId) as {character_id:string;role:Role;name:string}|undefined;
+      const target=this.db.prepare('SELECT p.character_id,p.role,coalesce(nullif(p.name_snapshot,\'\'),c.name) AS name FROM experiment_participants p JOIN characters c ON c.id=p.character_id WHERE p.experiment_id=? AND p.character_id=?').get(id,action.targetCharacterId) as {character_id:string;role:Role;name:string}|undefined;
       if(!target)throw new Error('The recipient is not part of this experiment.');
       const captured=target.role==='wolf';
       const updated=this.db.prepare(`UPDATE capture_flags SET custodian_id=?,status=?,captured_by=?,transferred_at=?

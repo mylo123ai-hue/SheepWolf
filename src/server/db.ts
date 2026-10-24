@@ -33,6 +33,7 @@ export function openDatabase(filename?: string) {
   applyMigration(3, '003_capture_the_flags.sql');
   applyMigration(4, '004_investigation.sql');
   applyMigration(5, '005_real_ai.sql');
+  applyMigration(6, '006_history_snapshots.sql');
   const insertCharacter = db.prepare('INSERT OR IGNORE INTO characters (id,name,personality,color,initials) VALUES (@id,@name,@personality,@color,@initials)');
   const seed = db.transaction(() => characters.forEach((character) => insertCharacter.run(character)));
   seed();

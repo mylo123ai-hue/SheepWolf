@@ -36,7 +36,7 @@ describe('shared autonomous experiment engine',()=>{
     const {engine}=fixture({provider});const run=engine.createExperiment({scenarioId,seed:'persist'});engine.pause(run.id);
     const afterOne=await engine.step(run.id);expect(afterOne.status).toBe('paused');expect(afterOne.decisionCount).toBe(1);expect(afterOne.postCount).toBe(1);
     expect(engine.getExperiment(run.id).decisionCount).toBe(1);
-    const afterTwo=await engine.step(run.id);expect(afterTwo.decisionCount).toBe(2);expect(afterTwo.postCount).toBe(2);expect(afterTwo.replyCount).toBe(1);
+    const afterTwo=await engine.step(run.id);expect(afterTwo.decisionCount).toBe(2);expect(afterTwo.postCount).toBe(1);expect(afterTwo.replyCount).toBe(1);
     const rows=engine.getForumRows(run.id);expect(rows.map(row=>row.body)).toContain('Let us take this one point at a time.');expect(rows.find(row=>row.body.startsWith('That helps'))?.parent_id).toBe(rows[0]?.id);
   });
   it('pauses without charging paused time, resumes, and stops without declaring a victory',async()=>{

@@ -61,6 +61,11 @@ app.post('/api/settings/providers/test',async(request,reply)=>{
 });
 
 app.get('/api/experiments/current',async()=>engine.getCurrent());
+app.get('/api/history',async()=>engine.listHistory());
+app.get<{Params:{id:string}}>('/api/history/:id',async(request,reply)=>{
+  try{const detail=engine.getHistoryDetail(request.params.id);return {...detail,forum:treePosts(detail.forum)};}
+  catch{return reply.code(404).send({error:'Saved experiment not found.'});}
+});
 const runInput=z.object({scenarioId:z.string(),seed:z.string().min(1).max(100).optional(),paceMs:z.number().int().min(100).max(30_000).optional(),maxDurationMs:z.number().int().min(1_000).max(86_400_000).optional(),maxDecisions:z.number().int().min(1).max(10_000).optional(),mode:z.enum(['demo','real']).default('demo')}).strict();
 app.post('/api/experiments',async(request,reply)=>{
   const parsed=runInput.safeParse(request.body);if(!parsed.success)return reply.code(400).send({error:'Check the scenario and run limits.'});
