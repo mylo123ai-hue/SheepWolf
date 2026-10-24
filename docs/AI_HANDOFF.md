@@ -58,6 +58,25 @@ Run a complete no-cost Capture the Flags game through the real application and v
 
 Update `docs/IMPLEMENTATION_PROGRESS.md` with verified features, exact test and application evidence, commit, limitations, and Block 4 as next. Replace this file with the next Block 4 assignment when Block 3 is complete. Commit the finished work and push to the existing `main` branch without rewriting history, following the repository's authorization.
 
+### Real UI evidence and screenshots
+
+The owner specifically wants to see the real application, not a generated design mockup. As part of Block 3 verification, launch the application and capture real browser screenshots from the running app (Playwright/headless Chromium is suitable). Show meaningful persisted simulated data rather than static placeholder screens.
+
+Save reviewable images under `docs/screenshots/`:
+- `scenario-library.png` — available and planned scenarios.
+- `capture-flags-forum.png` — Capture the Flags live forum with actual simulated discussion and readable scenario activity.
+- `capture-flags-observer.png` — administrator-only full flag state, five initial flags, current custodians, captured count and valid experiment controls.
+- `capture-flags-result.png` — an authentic final scenario outcome, clearly distinguished from stopped/failed.
+- `capture-flags-mobile.png` — usable mobile viewport of the running scenario.
+
+Do not fabricate screenshots, paste artwork over the UI, or claim a screenshot was captured if browser execution failed. If screenshots cannot be captured in the environment, record the blocker and the exact runnable evidence instead. Images must not expose credentials or other unrelated private data. Link the screenshots in the completion report.
+
+### Acceptance and return evidence
+
+Verify the application through actual UI and HTTP controls, not only isolated tests. At least one demo run must exercise a valid flag transfer and a real terminal state. Use deterministic fixtures or focused tests to cover *both* victory paths without forcing every organic simulated run to the same scripted winner. Verify invalid/duplicate transfer requests do not change custody or append false success events, and verify visibility by acting as uninvolved participants where the API supports that distinction.
+
+Return: user-visible behaviour; commit and CI link; exact test counts and commands; evidence of no-cost simulated gameplay; direct screenshot links; privacy and restart test results; unresolved limitations; and a ready-to-run Block 4 handoff. A successful local build or a Codex-reported DONE alone is not sufficient evidence.
+
 ### Block 3 done when
 
 A real demo experiment can create and display five safe flags, accept and persist only valid voluntary transfers, immediately record irreversible Wolf captures, correctly conclude a Wolf victory at three captures, correctly evaluate Sheep success or non-victory at valid finalization, and preserve accurate observer/event history through reload and backend restart. All automated checks pass and verification evidence is documented.
