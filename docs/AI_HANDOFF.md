@@ -1,36 +1,51 @@
-# AI handoff — Sheep vs Wolf Block 2
+# AI handoff — Sheep vs Wolf Block 3
 
-Copy the prompt below into the next Codex session.
+Copy the assignment below into the next Codex session.
 
 ---
 
-## Prompt for the next engineering session
+## Assignment: Block 3 — Capture the Flags
 
-Continue work in the existing `mylo123ai-hue/SheepWolf` repository. The current `main` branch contains Block 1. Start by checking `git status`, reading `AGENTS.md`, `docs/PRODUCT_SPEC.md`, and `docs/IMPLEMENTATION_PROGRESS.md`, then inspect the current implementation before changing it. The last verified foundation commit is `83b5dfc`; the progress-log commit is `9d093c8`.
+Continue work in the existing `mylo123ai-hue/SheepWolf` repository. Begin with `git status`, then read `AGENTS.md`, `docs/PRODUCT_SPEC.md`, `docs/IMPLEMENTATION_PROGRESS.md`, and inspect the current code. Block 1 and Block 2 are complete; preserve them. Implement **Block 3 only**. Do not build The Investigation, real AI providers, history/replay, or unrelated features.
 
-Complete **Block 2 only: Autonomous Agents and Live Forum** from the product spec. Work autonomously on routine engineering decisions. Do not stop at a design or mock screen: implement the shared engine, connect the UI and API to it, and verify the working demo. Do not advance into the two scenario implementations assigned to Blocks 3 and 4.
+Work autonomously on routine engineering decisions. Use the existing React/TypeScript, Fastify, SQLite and shared experiment engine. Do not stop at a plan, mock screen, or documentation. Do not make external or paid model requests.
 
-### Required Block 2 result
+### Goal
 
-A local administrator can start a no-cost simulated run with the seven recurring characters. The shared engine assigns five Sheep and two Wolves for that run, runs eligible agents without a fixed speaking order, persists decisions and discussion, streams new activity to the browser, and responds correctly to start, pause, resume, single-step, and stop. The same run survives a browser refresh; after a backend restart, an interrupted run is recovered safely rather than silently continuing or being lost.
+Make Capture the Flags a complete playable scenario on top of the shared autonomous engine. Sheep try to protect their flags. The two Wolves persuade Sheep to voluntarily transfer flags; they cannot steal flags directly. The game ends with a valid scenario victory or a non-victory stop/failure.
 
-### Implementation scope
+### Rules to implement
 
-- Preserve the existing React/TypeScript, Vite, Fastify, SQLite, loopback-only architecture. Add versioned migrations for new run data.
-- Create per-run experiment and participant records, an immutable settings snapshot, role seed/assignment, decisions, events and run-scoped forum posts/replies. Preserve the existing preview content; do not relabel those sample posts as AI-generated.
-- Keep all seven stable character identities and profiles. Assign roles afresh per run and record the assignment. The observer may retrieve roles and private objectives from administrator endpoints. Participant-facing data and model context must not expose hidden Wolf identities, other agents’ private instructions, or admin data. Wolves may know their fellow Wolf. Give every run fresh conversation memory.
-- Implement one shared scheduler in the backend. Select among eligible agents with reasonable fairness and without a fixed Sheep-then-Wolf sequence. Agents may post, reply, remain silent, propose an ending, or respond to a proposal. Use one simulated decision provider; do not call external model services or present the demo as real AI.
-- Persist accepted decisions and their effects safely. Prevent overlapping decisions, make step execute exactly one eligible decision while paused, respect pause/stop promptly, and recover an interrupted `running` status as paused or an explicitly recorded incomplete run.
-- Enforce adjustable limits from the run snapshot, with defaults of 20 active minutes and 100 decisions. Paused time must not count. Each participant needs two decision opportunities before early ending is available. Early conclusion requires agreement from at least three of the five Sheep. The engine must expose a typed scenario lifecycle boundary for terminal checks/finalization, but do not implement Capture the Flags or Investigation mechanics in this block. If no scenario score can yet be produced, store an unscored/neutral conclusion; never invent a victory.
-- Add server-sent events (or a similarly reliable local live-update path) for posts, decisions, status and scenario events. Keep historical refresh separate from producing new decisions; reconnecting a browser must not duplicate actions.
-- Wire the Observer Desk with real participant roles, recent decisions, counters and lifecycle controls. Wire the forum to the selected run and retain readable discussion/activity views. Make run status and simulated-demo labeling clear. The administrator does not speak as a participant.
-- Use server-side validation and ensure ordinary participant API responses never include administrator-only fields. Do not expose credentials; none are needed in this block.
+- Create one unique flag for each of the five Sheep at run initialization. Wolves start with none; all flags start safe.
+- A flag has a stable ID, original Sheep owner, current custodian, and safe/captured status.
+- Only the current custodian can authorize transfer. Sheep may transfer to any participant, including a Wolf. Wolves may transfer a flag they hold only if the scenario rules permit it; a flag received by a Wolf becomes captured immediately and cannot be recovered or transferred again.
+- Speech never changes ownership. Transfer is an explicit scenario action selected by the agent and validated by the server.
+- Reject unknown flags, non-custodian transfers, self-transfers if they have no meaningful game effect, and any action against an already captured flag.
+- Wolves cannot use a direct steal action. The demo provider should be capable of choosing a voluntary transfer action occasionally, based on its role/context and discussion, without a hardcoded guaranteed result or a universal Sheep refusal.
+- Wolf victory occurs when three unique flags have been captured. It may finalize immediately once the third capture is persisted.
+- Sheep victory occurs only when the game validly concludes with at least three uncaptured flags. Administrator stop, provider failure, or interrupted finalization must never be scored as a victory.
+- Preserve the Block 2 ending consensus, duration and decision limits. On a valid end or limit finalization, evaluate flags and assign the correct outcome or explicit inconclusive/unscored result.
 
-### Verify before finishing
+### Privacy and persistence
 
-Add focused unit/integration tests for role counts and role privacy, fresh per-run memory, fairness/eligibility, post/reply persistence, one-step behavior, pause/resume/stop, ending thresholds, action/runtime limits, idempotency and interrupted-run recovery. Mock the decision provider. Do not use paid API calls.
+- Persist the flag state and each accepted transfer atomically with its immutable ordered game event and agent decision.
+- Keep private transfers visible to the involved participants and administrator by default. Other participant contexts and ordinary public endpoints must not reveal hidden identities, private transfer metadata, or administrator-only state.
+- Make the full current flag state, original owners, capturing Wolf, and transfer history visible in the local Observer Desk.
+- Add run-scoped typed actions to the existing scenario boundary. Do not add a generic rules language or separate agent processes.
+- Keep all accepted state valid across browser refresh and process restart. Replay/reconstruction is not a Block 3 requirement, but the event record must be sufficient to review transfer history.
 
-Run from a clean dependency state where practical:
+### UI and API
+
+- Connect Capture the Flags setup, forum activity and observer progress to actual persisted scenario state.
+- Present successful transfers as readable scenario events in the activity timeline, respecting their privacy settings.
+- Keep all ownership and victory validation on the backend. Do not trust client-supplied roles or custodians.
+- Preserve the public participant API's information boundary and the existing local-only loopback setup.
+
+### Tests and verification
+
+Add focused automated unit/integration tests covering initial inventory, uniqueness, valid Sheep-to-Sheep transfer, valid Sheep-to-Wolf capture, inability to steal, custody validation, captured flag immutability, duplicate/atomic persistence, event privacy, the three-flag Wolf victory, Sheep victory with at least three safe flags, non-victory stop/failure, and persistence/recovery. Mock the decision provider; do not spend API credits.
+
+Run and record exact results for:
 
 ```sh
 npm ci
@@ -39,16 +54,19 @@ npm run build
 npm test
 ```
 
-Also run the app and demonstrate a complete simulated run through actual HTTP/UI controls, including pause, one step, resume or stop, refresh persistence and live forum updates. Record what was observed; a successful build alone is not evidence of a functioning engine. Keep the Windows CI workflow passing. A Windows 10 machine may not be available, so state that limit accurately.
+Run a complete no-cost Capture the Flags game through the real application and verify controls, flag display, activity events, valid victory evaluation, restart safety, and public/private information boundaries. Keep the Windows GitHub Actions checks working. State clearly whether Windows 10 itself was directly tested.
 
-Update `docs/IMPLEMENTATION_PROGRESS.md` with implemented behavior, exact verification evidence, known limitations, commit hash and Block 3 as the next step. Update docs if implementation assumptions change. Commit the completed Block 2 work and push the commit to the existing `main` branch without rewriting history. Do not claim real AI, playable scenario mechanics, scenario scoring, history replay, or Windows 10 runtime verification unless they have actually been implemented and tested.
+Update `docs/IMPLEMENTATION_PROGRESS.md` with verified features, exact test and application evidence, commit, limitations, and Block 4 as next. Replace this file with the next Block 4 assignment when Block 3 is complete. Commit the finished work and push to the existing `main` branch without rewriting history, following the repository's authorization.
+
+### Block 3 done when
+
+A real demo experiment can create and display five safe flags, accept and persist only valid voluntary transfers, immediately record irreversible Wolf captures, correctly conclude a Wolf victory at three captures, correctly evaluate Sheep success or non-victory at valid finalization, and preserve accurate observer/event history through reload and backend restart. All automated checks pass and verification evidence is documented.
 
 ---
 
-## Current repository state
+## Current verified state
 
-- Block 1 foundation is on `main` and pushed to GitHub.
-- Main app files: `src/client/ui/App.tsx`, `src/client/ui/styles.css`, `src/client/api.ts`, `src/server/app.ts`, `src/server/db.ts`, `src/server/catalog.ts`, and `src/server/migrations/001_initial.sql`.
-- Demo forum examples are persistent SQLite seed data and explicitly not autonomous output.
-- `Start SheepWolf.bat` is provided. Windows CI uses `windows-2022` and Node 22. Windows 10 itself was not directly tested.
-- Latest progress and verification evidence are in `docs/IMPLEMENTATION_PROGRESS.md`.
+- Block 1 foundation and GUI: commit `83b5dfc`.
+- Block 2 autonomous engine, persistence, live forum, observer controls and recovery: see latest commit and the evidence in `docs/IMPLEMENTATION_PROGRESS.md`.
+- Runtime: local Node.js app, Fastify, SQLite, React/Vite; Windows CI uses Windows Server 2022 and Node 22.
+- Demo mode makes no paid or external model calls. Current runs are explicitly simulated and end with an unscored conclusion until scenario mechanics are implemented.

@@ -8,3 +8,12 @@ export interface ForumPost {
   id: number; scenarioId: string; parentId: number | null; authorId: string; title: string | null;
   body: string; createdAt: string; children?: ForumPost[];
 }
+export type ExperimentStatus = 'running' | 'paused' | 'completed' | 'stopped' | 'failed' | 'incomplete_finalization';
+export interface RunConfig { mode: 'demo'; paceMs: number; maxDurationMs: number; maxDecisions: number; minimumActionsPerParticipant: 2; }
+export interface ExperimentParticipant { characterId:string;name:string;personality:string;role:'sheep'|'wolf';privateObjective:string;actionOpportunities:number;endingVote:'agree'|'disagree'|null;lastDecisionAt:string|null;recentAction:string|null; }
+export interface ExperimentSnapshot {
+  id:string;scenarioId:string;status:ExperimentStatus;config:RunConfig;roleSeed:string;createdAt:string;startedAt:string;endedAt:string|null;
+  activeElapsedMs:number;decisionCount:number;outcome:unknown;stopReason:string|null;participants:ExperimentParticipant[];postCount:number;replyCount:number;
+  recentDecisions:{sequence:number;characterId:string;actionType:string;createdAt:string;summary:string}[];
+}
+export interface PublicExperimentSnapshot {id:string;scenarioId:string;status:ExperimentStatus;createdAt:string;startedAt:string;endedAt:string|null;activeElapsedMs:number;decisionCount:number;postCount:number;replyCount:number;}

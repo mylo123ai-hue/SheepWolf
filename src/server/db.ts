@@ -20,6 +20,16 @@ export function openDatabase(filename?: string) {
       db.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (1, ?)').run(new Date().toISOString());
     })();
   }
+  const applyMigration = (version: number, filename: string) => {
+    const applied = db.prepare('SELECT version FROM schema_migrations WHERE version = ?').get(version);
+    if (applied) return;
+    const migrationSql = readFileSync(new URL(`./migrations/${filename}`, import.meta.url), 'utf8');
+    db.transaction(() => {
+      db.exec(migrationSql);
+      db.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(version, new Date().toISOString());
+    })();
+  };
+  applyMigration(2, '002_experiments.sql');
   const insertCharacter = db.prepare('INSERT OR IGNORE INTO characters (id,name,personality,color,initials) VALUES (@id,@name,@personality,@color,@initials)');
   const seed = db.transaction(() => characters.forEach((character) => insertCharacter.run(character)));
   seed();

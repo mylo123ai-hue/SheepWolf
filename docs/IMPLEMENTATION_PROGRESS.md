@@ -2,16 +2,22 @@
 
 ## Block 1 — Foundation and GUI
 
-**Status:** Implemented and verified locally; committed in this block.
-
-**Implemented:** Empty GitHub repository cloned and initialized locally. React/TypeScript + Vite frontend, Fastify API, SQLite persistence and stable seven-character catalog. Scenario Library shows two playable previews plus four planned entries. Forum supports persisted thread/reply creation, nested discussion, activity view, participant selection, demo labeling, light/dark preference, responsive layout and page shell for observer/history/settings. Seeded sample posts are clearly presented as preview content. SQLite data defaults to the user's application data folder. Windows launcher, setup notes, concise agent guide and Windows GitHub Actions workflow added.
-
-**Not implemented yet:** Autonomous scheduler, run lifecycle, game mechanics/actions, event streaming, real AI providers, credential storage, history/replay, scenario configuration, completed experiment controls and Windows 10 runtime verification.
+**Status:** Implemented and verified locally.
 
 **Commit:** `83b5dfc` — Block 1 application foundation.
 
-**Verification:** `npm ci` completed successfully. `npm run typecheck`, `npm run build`, and `npm test` passed (2 tests). Started the Vite/Fastify development app and verified `/api/health`, all 6 scenarios (2 playable), seeded nested forum replies, and Vite proxy API access. Created and reloaded a forum thread plus nested reply through HTTP. Started the production Fastify server on an isolated data directory and verified the built UI and API responses. GitHub Actions checks are configured for Windows Server 2022 / Node 22; Windows 10 itself was not available for a direct run.
+**Evidence:** `npm ci`, `npm run typecheck`, `npm run build`, and `npm test` passed (2 tests). Vite/Fastify health, scenario catalog, seeded nested replies, HTTP post/reply persistence, built UI, and Windows Server 2022 / Node 22 CI configuration were verified. Windows 10 itself was not directly tested.
 
-**Known limits:** No automated browser-level test yet. This block has no live-update stream, autonomous engine, game mechanics, run lifecycle, API provider, or history replay; those remain assigned to later blocks. The demo posts are sample persisted records, not AI output.
+## Block 2 — Autonomous agents and live forum
 
-**Next block:** Block 2 — shared autonomous demo engine, role/privacy boundaries, controls, persisted decisions and live updates. Copy-ready session prompt: `docs/AI_HANDOFF.md`.
+**Status:** Implemented and verified locally; committed with this progress update.
+
+**Implemented:** A shared SQLite-backed scheduler creates runs with exactly five Sheep and two Wolves from independently recorded per-run role seeds. Stable character identities are reused with fresh per-run memory. Agent context contains only that participant's objective and permitted knowledge; Wolves know their teammate, while Sheep do not. The simulated provider generates varied posts, replies, silence, ending proposals, and votes without external services. The engine persists decisions, memory updates, run-scoped forum messages, lifecycle changes, and ordered events transactionally. Round-robin fairness among participants with the fewest opportunities avoids a fixed character order. Duration and decision caps, two-opportunity minimum, three-Sheep ending agreement, pause-aware active time, and interruption recovery are enforced. Observer controls and role details, current-run refresh, forum discussion, activity stream, and SSE-driven UI updates use real experiment state. Empty lifecycle requests no longer carry an invalid JSON content type.
+
+**Verification:** `npm ci` succeeded after moving `better-sqlite3` to `^12.11.1` to fix Node 24 native binding startup failures; `npm run typecheck` passed; `npm run build` passed; `npm test` passed (14 tests across 3 files). Browser checks through headless Chromium exercised Start, Pause, exactly-one Step, Resume, Stop, refresh persistence without duplicate decisions, and SSE-driven live forum posts/replies. HTTP checks confirmed public summaries omit participant roles and a full simulated run completed by three-Sheep consensus (22 decisions, 15 posts, 9 replies). A stopped run retained a null outcome. A separate process restart recovered a running experiment as paused with its run/participant data intact. No external or paid model calls were used. Automated checks cover role counts/seeds, private knowledge, fresh memory, varied fair ordering, post/reply persistence, controls, consensus thresholds, decision/time limits, interrupted-run recovery, and request headers.
+
+**Known limits:** The two listed scenarios still use the shared Block 2 discussion/ending lifecycle only. Capture the Flags actions/scoring and The Investigation actions/scoring are not implemented in this block. Real model providers, history/replay, and direct Windows 10 runtime verification remain outstanding. CI is configured for Windows Server 2022 with Node 22; this environment did not provide Windows for direct testing.
+
+**Commit:** To be recorded after the Block 2 commit is created.
+
+**Next block:** Block 3 — playable Capture the Flags mechanics. Assignment: `docs/AI_HANDOFF.md`.
