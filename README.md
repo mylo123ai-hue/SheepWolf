@@ -1,21 +1,87 @@
-# Sheep vs Wolf
+# Sheep vs Wolf — The Commons
 
-Sheep vs Wolf is a local-first browser simulation with seven recurring AI participants. The Scenario Library includes two playable games: Capture the Flags and The Investigation. The shared engine, threaded forum, observer controls and SQLite persistence power both a free simulated demo and an opt-in DeepSeek mode.
+**Seven personalities. Two hidden Wolves. Every conversation changes the story.**
 
-## Run locally
+The Commons is a local-first social experiment platform. An observer launches a scenario and watches seven recurring characters talk, reason, cooperate and deceive: five Sheep, two hidden Wolves, and no human player-character.
 
-Requirements: 64-bit Windows 10 (or a recent macOS/Linux development machine), Node.js 20.18–24.x, npm and a current browser. Install 64-bit Node.js once from [nodejs.org](https://nodejs.org/). On Windows, **Start SheepWolf.bat** checks the Node version, installs the locked dependencies on first launch, starts the development servers, waits for both local services, then opens the default browser. It detects an already-running copy to avoid starting a duplicate. The server window stays open; press **Ctrl+C** there to stop the app. The app binds its API and Vite server to loopback addresses only. The launcher requires Node.js and is not a standalone Windows executable.
+> ## ▶ [Try the free browser demo — downloadable, unhosted preview](demo/README.md#play-the-demo)
+>
+> **Live hosted demo: not deployed.** The link opens instructions for a self-contained preview you download and run in your browser. This repository does not serve a public game website.
 
-For a terminal start:
+## The table
+
+Two scenarios are playable in the full local application. Each run assigns roles afresh; personalities remain attached to their characters.
+
+| Scenario | Sheep objective | Wolf objective | Main mechanic |
+| --- | --- | --- | --- |
+| **Capture the Flags** | Protect at least three flags at a valid conclusion. | Persuade Sheep to voluntarily transfer three flags. | Each Sheep starts with a unique flag. A Wolf cannot steal; a flag transferred to a Wolf is captured permanently. |
+| **The Investigation** | Use fictional archive evidence to identify what happened. | Steer at least three Sheep toward the designated false conclusion. | Sheep discuss and privately submit final conclusions. Wolf votes do not score. |
+
+The recurring characters are Willow (analytical), Rowan (persuasive), Clover (trusting), Fern (sceptical), Moss (practical), Ash (independent) and Brook (empathetic). Their names, avatars and temperaments persist between runs; each experiment starts with fresh conversation memory.
+
+**Planned only:** The Rumour, Secret Keeper, Survival Council and Find the Wolves. They are not playable.
+
+## Screens from the running application
+
+These screenshots are from the real local application, not product mockups. The separate browser demo has its own screenshots below.
+
+| Scenario library | Live forum |
+| --- | --- |
+| ![Scenario Library with two playable scenarios and planned entries](docs/screenshots/block6-scenario-library.png) | ![Live forum showing autonomous participant discussion](docs/screenshots/block6-live-forum-running.png) |
+
+| Observer and flags | History replay |
+| --- | --- |
+| ![Observer Desk showing participant roles and flag custody](docs/screenshots/block6-observer-running.png) | ![Read-only replay of a persisted investigation](docs/screenshots/block6-history-replay.png) |
+
+| Settings | Mobile replay |
+| --- | --- |
+| ![Local Settings with protected or session-only AI credential options](docs/screenshots/block6-settings.png) | ![Responsive replay at a narrow mobile width](docs/screenshots/block6-mobile-replay.png) |
+
+## Browser preview screens
+
+The free preview uses a separate static bundle and browser-only scripted decisions.
+
+| Capture the Flags | The Investigation |
+| --- | --- |
+| ![Completed browser preview showing voluntary flag captures and the Sheep outcome](docs/screenshots/showcase-demo-capture-completed.png) | ![Completed browser preview showing the archive case and five final Sheep conclusions](docs/screenshots/showcase-demo-investigation-completed.png) |
+
+![The browser-only Investigation preview stacked for a 390-pixel mobile screen](docs/screenshots/showcase-demo-mobile.png)
+
+## Browser preview and full local application
+
+The linked preview is a small, static showcase. It lets you choose both scenarios, watch scripted agents discuss the case, inspect the observer panel and progress a bounded run. It runs from one HTML file or a static build, in one browser, with no account or backend. Reloading clears the run.
+
+The full local application is the complete product experience: it persists runs in local SQLite, provides history and replay, and defaults to the no-cost simulated engine. It can optionally use DeepSeek only after an administrator saves credentials, enables Real AI and chooses that mode for a run.
+
+| | Browser preview | Full local application |
+| --- | --- | --- |
+| Where it runs | One browser tab, including from a downloaded HTML file | Local browser plus local Node.js services |
+| Decisions | Scripted, deterministic demo behavior | Shared experiment engine; scripted demo or explicitly enabled DeepSeek |
+| Saved data | None; refresh clears the current table | Local SQLite history, forum, actions and outcomes |
+| Credentials/settings | Not present | Provider Settings; Windows OS-protected key storage or session-only key |
+| Role boundary | Display is observer-oriented, but roles are inspectable by the browser owner | Roles and objectives are filtered on the server for participant context |
+
+The preview is not evidence of live AI reasoning, secure hidden roles against its browser user, backend persistence, or a hosted product. Full-app Demo mode makes no external model requests. Real-AI spending controls are local estimates, **not** a provider-enforced account spending cap. Provider tests use mocked HTTP responses; no live paid DeepSeek request has been made in development or CI.
+
+## Run the full application on Windows
+
+**Target:** 64-bit Windows 10. **Windows 10 itself has not been directly tested in this work:** verification ran in GitHub Actions on Windows Server 2022. The accepted Block 1–6 baseline passed its Windows workflow on Node 22 with 71/71 tests in [run 40060974604](https://github.com/mylo123ai-hue/SheepWolf/actions/runs/40060974604).
+
+1. Install 64-bit [Node.js](https://nodejs.org/) version **20.18 through 24.x** and a current browser.
+2. Double-click **Start SheepWolf.bat**. On first launch the batch file runs `npm ci`, starts the local services and opens the browser when ready. Keep its terminal open while playing.
+3. The full application opens at [http://127.0.0.1:5173](http://127.0.0.1:5173). Its local API listens at `http://127.0.0.1:3000`. Both bind to loopback by default.
+4. To stop the app, press **Ctrl+C** in the SheepWolf terminal.
+
+The launcher requires Node.js and is **not** a standalone `.exe`.
+
+For a terminal development run:
 
 ```sh
 npm ci
 npm run dev
 ```
 
-The UI is at `http://127.0.0.1:5173`; the API is at `http://127.0.0.1:3000`. Stop the development servers with `Ctrl+C`.
-
-Run verification with:
+To check the full application:
 
 ```sh
 npm run typecheck
@@ -23,27 +89,25 @@ npm run build
 npm test
 ```
 
-The SQLite database is stored under `%APPDATA%\SheepWolf\sheepwolf.sqlite` on Windows and `~/.sheepwolf/sheepwolf.sqlite` on macOS/Linux. Set `SHEEPWOLF_DATA_DIR` to choose another directory. In PowerShell, set it for the current session with `$env:SHEEPWOLF_DATA_DIR = 'D:\SheepWolf Data'` before starting the launcher from that PowerShell window, or set a persistent user value with `[Environment]::SetEnvironmentVariable('SHEEPWOLF_DATA_DIR', 'D:\SheepWolf Data', 'User')` and restart the launcher. Paths containing spaces are supported. Existing application data is not used for provider credentials.
+## Local data and backups
 
-### Backup and recovery
+The full app stores SQLite data in `%APPDATA%\SheepWolf\sheepwolf.sqlite` on Windows and `~/.sheepwolf/sheepwolf.sqlite` on macOS/Linux. Set `SHEEPWOLF_DATA_DIR` to move it. In the PowerShell window used to start the app:
 
-Stop Sheep vs Wolf with **Ctrl+C** in its server window before copying or restoring its database. Copy the complete app-data directory (the default Windows directory is `%APPDATA%\SheepWolf`) to a separate backup location. To restore, stop the app and copy the saved directory back to the configured data directory. Keep the SQLite database and its same-directory files together; do not copy a database while the server is writing it. If startup reports that only one local service is ready, close the existing server window and retry. If a port is in use, stop the other local SheepWolf process before starting again. The launcher does not kill arbitrary processes.
+```powershell
+$env:SHEEPWOLF_DATA_DIR = 'D:\SheepWolf Data'
+.\Start SheepWolf.bat
+```
 
-## Demo and real AI modes
+Stop SheepWolf before making or restoring a backup. Copy the complete configured data directory and keep its SQLite files together. Never copy the database while the app is writing to it.
 
-Demo is the default and makes no external requests. It uses the same persisted engine and both scenario rule sets.
+## Project and verification
 
-To configure DeepSeek, open **Settings** and choose one of the currently documented model IDs (`deepseek-flash` or `deepseek-v4-pro`). Enter a key, then choose protected OS storage where available or explicitly select session-only memory. The application never writes the key to SQLite, browser storage, run snapshots or logs. Windows protected storage uses the Windows Credential Manager through the OS keyring API. If protected storage cannot be used, the app offers session-only memory instead of a plaintext file.
+- `src/client/` — React and TypeScript interface for the full local application.
+- `src/server/` — Fastify, SQLite migrations, experiment engine and providers.
+- `src/shared/` — shared application types.
+- `demo/` — separate browser-only showcase source and self-contained preview.
+- [`docs/PRODUCT_SPEC.md`](docs/PRODUCT_SPEC.md) — approved product scope and rules.
+- [`docs/IMPLEMENTATION_PROGRESS.md`](docs/IMPLEMENTATION_PROGRESS.md) — block status and verification history.
+- [`codex/results/SW-B06.md`](codex/results/SW-B06.md) — Block 6 acceptance evidence and limitations.
 
-Saving a key does not enable model requests. Enable **Real AI for runs** in Settings, save the settings, and then explicitly choose **DeepSeek real AI** when launching a run. The Observer Desk shows that run's request, token and locally estimated spend totals. Request/token/spend reservations are enforced before each model call and are saved in SQLite. The spending ceiling is a local estimate based on current published peak rates with a 20% margin; it is not a DeepSeek account-level cap and does not guarantee the provider's charges. Current models and pricing were checked on 24 October 2026 in the [DeepSeek chat completion docs](https://api-docs.deepseek.com/api/create-chat-completion) and [models and pricing](https://api-docs.deepseek.com/quick_start/pricing).
-
-**Test Connection** sends one direct, non-generation request to DeepSeek's models endpoint only after the administrator clicks and confirms it. Real run decisions use the chat-completions endpoint. No provider call is made automatically when the application starts, when a key is saved, or when demo mode runs. Automated provider tests use mocked HTTP responses; no paid DeepSeek request was made during development.
-
-## Current implementation status
-
-- Capture the Flags and The Investigation run through the shared autonomous engine, with scenario-specific validation and observer state.
-- Real DeepSeek requests are opt-in and bounded; roles, objectives and scenario details are assembled from each participant's server-filtered context.
-- Experiment History preserves run configuration, role and profile snapshots, discussion, ordered events, scenario state, model usage, outcomes and stop/failure reasons. Its replay view walks saved events without calling a provider or changing the run.
-- The Windows launcher checks the supported Node.js range, waits for loopback API/frontend readiness, opens the app only when available, and reports startup failures without killing unrelated services.
-- GitHub Actions on Windows Server 2022 / Node 22 run the protected-key Settings flow in headless Chromium against a unique disposable Windows Credential Manager entry, then run the batch launcher from a clean path containing spaces and verify loopback binding, duplicate-launch reuse and SQLite recovery. The browser test forbids provider traffic and checks for key leaks. This verifies Windows Server 2022, not Windows 10 itself; Windows 10 was not directly run in this work block.
-- Live provider behavior has not been verified because development and CI use mocked transport only. A live connection test requires a configured key and an administrator's direct action.
+The project has two playable scenarios, a no-cost full-app demo, experiment history/replay, local SQLite recovery and optional mocked/tested provider integration. Direct Windows 10 and live provider behavior remain unverified. The four future scenarios are planned only.

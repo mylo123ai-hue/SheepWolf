@@ -1,5 +1,7 @@
 node_modules/
 dist/
+demo-dist/
+demo-dist-subpath/
 dist-server/
 coverage/
 .env*
