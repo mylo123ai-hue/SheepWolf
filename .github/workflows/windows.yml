@@ -48,7 +48,7 @@ jobs:
           try {
             Wait-AppReady $launcher
             $run = Invoke-RestMethod -Method Post 'http://127.0.0.1:3000/api/experiments' -ContentType 'application/json' -Body '{"scenarioId":"capture-the-flags","seed":"windows-launcher-data-smoke","mode":"demo","paceMs":30000,"maxDurationMs":60000,"maxDecisions":10}'
-            $stopped = Invoke-RestMethod -Method Post "http://127.0.0.1:3000/api/experiments/$($run.id)/stop"
+            $stopped = Invoke-RestMethod -Method Post "http://127.0.0.1:3000/api/experiments/$($run.id)/stop" -ContentType 'application/json' -Body '{}'
             if ($stopped.status -ne 'stopped') { throw 'The launcher smoke experiment did not stop cleanly.' }
             if (-not (Test-Path (Join-Path $env:SHEEPWOLF_DATA_DIR 'sheepwolf.sqlite'))) { throw 'The launcher did not create its configured SQLite database.' }
             $ports = Get-NetTCPConnection -State Listen -LocalPort 3000,5173
