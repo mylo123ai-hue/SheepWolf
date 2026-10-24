@@ -15,7 +15,11 @@
     "start": "tsx src/server/index.ts",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.server.json",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "demo:build": "node scripts/build-demo.mjs",
+    "demo:browser-test": "node scripts/demo-browser-smoke.mjs",
+    "check:readme": "node scripts/check-readme-links.mjs",
+    "demo:serve": "node scripts/serve-demo.mjs"
   },
   "dependencies": {
     "@fastify/cors": "^10.0.2",
