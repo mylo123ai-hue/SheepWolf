@@ -1,4 +1,4 @@
-import type { Character, ExperimentSnapshot, ForumPost, PublicExperimentSnapshot, ScenarioSummary } from '../shared/types';
+import type { Character, ExperimentSnapshot, ForumPost, ProviderRunLimits, PublicExperimentSnapshot, ScenarioSummary } from '../shared/types';
 const request = async <T,>(url: string, init?: RequestInit): Promise<T> => {
   const headers = new Headers(init?.headers);
   if (init?.body !== undefined && !headers.has('content-type')) headers.set('content-type', 'application/json');
@@ -15,7 +15,19 @@ export const api = {
   currentExperiment: () => request<ExperimentSnapshot|null>('/api/experiments/current'),
   experiment: (id:string) => request<ExperimentSnapshot>(`/api/experiments/${id}`),
   publicExperiment: (id:string) => request<PublicExperimentSnapshot>(`/api/experiments/${id}/public`),
-  startExperiment: (input:{scenarioId:string;paceMs:number;maxDurationMs:number;maxDecisions:number}) => request<ExperimentSnapshot>('/api/experiments',{method:'POST',body:JSON.stringify(input)}),
+  startExperiment: (input:{scenarioId:string;paceMs:number;maxDurationMs:number;maxDecisions:number;mode:'demo'|'real'}) => request<ExperimentSnapshot>('/api/experiments',{method:'POST',body:JSON.stringify(input)}),
   controlExperiment: (id:string,control:'pause'|'resume'|'step'|'stop') => request<ExperimentSnapshot>(`/api/experiments/${id}/${control}`,{method:'POST'}),
+  providerSettings:()=>request<ProviderSettings>('/api/settings/providers'),
+  updateProviderSettings:(input:Pick<ProviderSettings,'provider'|'model'|'realModeEnabled'|'limits'>)=>request<ProviderSettings>('/api/settings/providers',{method:'PUT',body:JSON.stringify(input)}),
+  saveProviderCredential:(key:string,persistence:'protected'|'session')=>request<ProviderSettings>('/api/settings/providers/credential',{method:'POST',body:JSON.stringify({key,persistence})}),
+  removeProviderCredential:()=>request<ProviderSettings>('/api/settings/providers/credential',{method:'DELETE'}),
+  testProviderConnection:()=>request<{ok:true;model:string;message:string}>('/api/settings/providers/test',{method:'POST',body:JSON.stringify({confirm:true})}),
   eventStream: (id:string) => `/api/experiments/${id}/observer/events`
 };
+
+export interface ProviderSettings {
+  provider:'deepseek';model:string;realModeEnabled:boolean;limits:ProviderRunLimits;
+  credential:{configured:boolean;storage:'protected'|'session'|'none';persistentAvailable:boolean;storageName:string};
+  supportedModels:{id:string;label:string}[];
+  pricing:{checkedAt:string;modelDocs:string;pricingDocs:string;estimateNote:string};
+}
