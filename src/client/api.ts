@@ -17,5 +17,5 @@ export const api = {
   publicExperiment: (id:string) => request<PublicExperimentSnapshot>(`/api/experiments/${id}/public`),
   startExperiment: (input:{scenarioId:string;paceMs:number;maxDurationMs:number;maxDecisions:number}) => request<ExperimentSnapshot>('/api/experiments',{method:'POST',body:JSON.stringify(input)}),
   controlExperiment: (id:string,control:'pause'|'resume'|'step'|'stop') => request<ExperimentSnapshot>(`/api/experiments/${id}/${control}`,{method:'POST'}),
-  eventStream: (id:string) => `/api/experiments/${id}/events`
+  eventStream: (id:string) => `/api/experiments/${id}/observer/events`
 };

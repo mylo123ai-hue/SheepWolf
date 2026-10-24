@@ -39,15 +39,17 @@ const treePosts=(rows:ReturnType<ExperimentEngine['getForumRows']>)=>{
   return roots;
 };
 app.get<{Params:{id:string}}>('/api/experiments/:id/forum',async(request,reply)=>{try{return treePosts(engine.getForumRows(request.params.id));}catch{return reply.code(404).send({error:'Experiment not found.'});}});
-app.get<{Params:{id:string}} & {Querystring:{after?:string}}>('/api/experiments/:id/events',(request,reply)=>{
+const eventStream=(observer:boolean)=>(request:Fastify.FastifyRequest<{Params:{id:string};Querystring:{after?:string}}>,reply:Fastify.FastifyReply)=>{
   try{engine.getPublicExperiment(request.params.id);}catch{return reply.code(404).send({error:'Experiment not found.'});}
   const raw=reply.raw;reply.hijack();raw.writeHead(200,{'content-type':'text/event-stream; charset=utf-8','cache-control':'no-cache, no-transform','connection':'keep-alive','x-accel-buffering':'no'});
   const header=Number(request.headers['last-event-id']);let cursor=Number.isSafeInteger(header)&&header>0?header:Number(request.query.after??0);if(!Number.isSafeInteger(cursor)||cursor<0)cursor=0;
-  const pump=()=>{try{for(const event of engine.getEvents(request.params.id,cursor)){raw.write(`id: ${event.id}\nevent: activity\ndata: ${JSON.stringify(event)}\n\n`);cursor=event.id;}}catch{raw.end();}};
+  const pump=()=>{try{for(const event of engine.getEvents(request.params.id,cursor,observer)){raw.write(`id: ${event.id}\nevent: activity\ndata: ${JSON.stringify(event)}\n\n`);cursor=event.id;}}catch{raw.end();}};
   const unsubscribe=engine.subscribe(event=>{if(event.experimentId===request.params.id)pump();});
   pump();const heartbeat=setInterval(()=>raw.write(': keep-alive\n\n'),15_000);
   raw.on('close',()=>{clearInterval(heartbeat);unsubscribe();});return reply;
-});
+};
+app.get<{Params:{id:string};Querystring:{after?:string}}>('/api/experiments/:id/events',eventStream(false));
+app.get<{Params:{id:string};Querystring:{after?:string}}>('/api/experiments/:id/observer/events',eventStream(true));
 
 const rowToPost = (row: any) => ({ id: row.id as number, scenarioId: row.scenario_id as string, parentId: row.parent_id as number | null, authorId: row.author_id as string, title: row.title as string | null, body: row.body as string, createdAt: row.created_at as string });
 const fetchPosts = db.prepare('SELECT id, scenario_id, parent_id, author_id, title, body, created_at FROM forum_posts WHERE scenario_id = ? ORDER BY created_at ASC, id ASC');

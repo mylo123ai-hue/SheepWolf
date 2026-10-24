@@ -2,22 +2,28 @@
 
 ## Block 1 — Foundation and GUI
 
-**Status:** Implemented and verified locally.
+**Status:** Implemented and verified locally. **Commit:** `83b5dfc` — Block 1 application foundation.
 
-**Commit:** `83b5dfc` — Block 1 application foundation.
-
-**Evidence:** `npm ci`, `npm run typecheck`, `npm run build`, and `npm test` passed (2 tests). Vite/Fastify health, scenario catalog, seeded nested replies, HTTP post/reply persistence, built UI, and Windows Server 2022 / Node 22 CI configuration were verified. Windows 10 itself was not directly tested.
+The React/TypeScript, Fastify, SQLite and Vite application provides the responsive local-first interface, scenario library, forum foundation, migrations and Windows Server 2022 / Node 22 CI. `npm ci`, typecheck, build and tests passed at completion. Windows 10 itself was not directly tested.
 
 ## Block 2 — Autonomous agents and live forum
 
-**Status:** Implemented and verified locally.
+**Status:** Implemented and verified locally. **Commit:** `7100e3e` — Implement autonomous demo engine and live forum.
 
-**Implemented:** A shared SQLite-backed scheduler creates runs with exactly five Sheep and two Wolves from independently recorded per-run role seeds. Stable character identities are reused with fresh per-run memory. Agent context contains only that participant's objective and permitted knowledge; Wolves know their teammate, while Sheep do not. The simulated provider generates varied posts, replies, silence, ending proposals, and votes without external services. The engine persists decisions, memory updates, run-scoped forum messages, lifecycle changes, and ordered events transactionally. Round-robin fairness among participants with the fewest opportunities avoids a fixed character order. Duration and decision caps, two-opportunity minimum, three-Sheep ending agreement, pause-aware active time, and interruption recovery are enforced. Observer controls and role details, current-run refresh, forum discussion, activity stream, and SSE-driven UI updates use real experiment state. Empty lifecycle requests no longer carry an invalid JSON content type.
+The shared engine assigns five Sheep and two Wolves per run, maintains fresh participant memory and server-side knowledge boundaries, schedules simulated actions, persists forum activity and decisions, supports lifecycle controls and ending consensus, streams activity, and pauses interrupted runs for recovery. Verification and Block 2 test evidence are retained in the previous commit history; no external model calls were used.
 
-**Verification:** `npm ci` succeeded after moving `better-sqlite3` to `^12.11.1` to fix Node 24 native binding startup failures; `npm run typecheck` passed; `npm run build` passed; `npm test` passed (14 tests across 3 files). Browser checks through headless Chromium exercised Start, Pause, exactly-one Step, Resume, Stop, refresh persistence without duplicate decisions, and SSE-driven live forum posts/replies. HTTP checks confirmed public summaries omit participant roles and a full simulated run completed by three-Sheep consensus (22 decisions, 15 posts, 9 replies). A stopped run retained a null outcome. A separate process restart recovered a running experiment as paused with its run/participant data intact. No external or paid model calls were used. Automated checks cover role counts/seeds, private knowledge, fresh memory, varied fair ordering, post/reply persistence, controls, consensus thresholds, decision/time limits, interrupted-run recovery, and request headers.
+## Block 3 — Capture the Flags
 
-**Known limits:** The two listed scenarios still use the shared Block 2 discussion/ending lifecycle only. Capture the Flags actions/scoring and The Investigation actions/scoring are not implemented in this block. Real model providers, history/replay, and direct Windows 10 runtime verification remain outstanding. CI is configured for Windows Server 2022 with Node 22; this environment did not provide Windows for direct testing.
+**Status:** Implemented and verified locally. **Commit:** see the current Block 3 commit after merge/push.
 
-**Commit:** `7100e3e` — Implement autonomous demo engine and live forum.
+Five stable per-run flags begin with the five Sheep. The server validates explicit custodian-authorized transfers, persists accepted transfers atomically with ordered events and decisions, prevents duplicate/repeated captures, and permanently captures a flag received by a Wolf. Three distinct captures immediately win for Wolves. A valid consensus or execution-limit conclusion scores Sheep only when at least three flags remain safe; stop/failure remains unscored. Transfer events are observer-visible and selectively participant-visible, while participant views and public events omit privileged flag/role state. Restart recovery preserves flag and transfer state.
 
-**Next block:** Block 3 — playable Capture the Flags mechanics. Assignment: `docs/AI_HANDOFF.md`.
+The Observer Desk displays live ownership, safe/captured totals, transfer history, and captured-flag victory progress. Capture the Flags is selectable; The Investigation is marked planned. The no-cost simulation uses the same engine and persisted forum/action records.
+
+**Verification:** `npm ci`, `npm run typecheck`, `npm run build`, and `npm test` passed (22 tests across 3 test files). Automated coverage includes inventory, role and context privacy, safe and Wolf transfers, invalid custody/target cases, captured flag immutability, Wolf victory, valid Sheep outcomes, stopped runs, persistence/recovery, and provider-driven demo behavior. A headless Chromium walkthrough used the actual UI and HTTP API: started a Capture the Flags run, observed live forum and Observer Desk updates, completed 43 persisted decisions and 40 forum rows, and verified the completed Sheep victory displayed five safe flags. The SQLite database contained five flags, one persisted voluntary transfer (Clover → Ash), 43 decisions, and 88 ordered experiment events. Public events excluded private transfer details; observer events included them. Screenshots are saved under `docs/screenshots/`.
+
+No paid or external model calls were made. Windows CI remains configured for Windows Server 2022 / Node 22; this environment did not provide Windows, so direct Windows 10 execution was not verified.
+
+**Known limits:** Investigation, real model providers, experiment history/replay, and Windows 10 runtime verification remain future work. Demo conversations are simulated, not evidence of genuine model reasoning.
+
+**Next block:** Block 4 — The Investigation. Assignment: `docs/AI_HANDOFF.md`.
