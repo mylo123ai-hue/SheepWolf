@@ -9,12 +9,26 @@ export interface ForumPost {
   body: string; createdAt: string; children?: ForumPost[];
 }
 export type ExperimentStatus = 'running' | 'paused' | 'completed' | 'stopped' | 'failed' | 'incomplete_finalization';
-export interface RunConfig { mode: 'demo'; paceMs: number; maxDurationMs: number; maxDecisions: number; minimumActionsPerParticipant: 2; }
+export interface ProviderRunLimits {
+  maxRequests: number;
+  maxInputTokens: number;
+  maxOutputTokens: number;
+  maxOutputTokensPerRequest: number;
+  maxEstimatedUsd: number;
+}
+export interface RunConfig {
+  mode: 'demo'|'real'; paceMs: number; maxDurationMs: number; maxDecisions: number; minimumActionsPerParticipant: 2;
+  provider?: { provider:'deepseek'; model:string; limits:ProviderRunLimits };
+}
+export interface ProviderUsageSnapshot {
+  requests:number; inputTokens:number; outputTokens:number; estimatedUsd:number;
+  limits:ProviderRunLimits; model:string;
+}
 export interface ExperimentParticipant { characterId:string;name:string;personality:string;role:'sheep'|'wolf';privateObjective:string;actionOpportunities:number;endingVote:'agree'|'disagree'|null;lastDecisionAt:string|null;recentAction:string|null; }
 export interface ExperimentSnapshot {
   id:string;scenarioId:string;status:ExperimentStatus;config:RunConfig;roleSeed:string;createdAt:string;startedAt:string;endedAt:string|null;
   activeElapsedMs:number;decisionCount:number;outcome:unknown;stopReason:string|null;participants:ExperimentParticipant[];postCount:number;replyCount:number;
-  recentDecisions:{sequence:number;characterId:string;actionType:string;createdAt:string;summary:string}[];scenarioState:CaptureTheFlagsState|InvestigationState|null;
+  recentDecisions:{sequence:number;characterId:string;actionType:string;createdAt:string;summary:string}[];scenarioState:CaptureTheFlagsState|InvestigationState|null;providerUsage:ProviderUsageSnapshot|null;
 }
 export interface PublicExperimentSnapshot {id:string;scenarioId:string;status:ExperimentStatus;createdAt:string;startedAt:string;endedAt:string|null;activeElapsedMs:number;decisionCount:number;postCount:number;replyCount:number;}
 export interface FlagRecord {flagId:string;originalOwnerId:string;originalOwnerName:string;custodianId:string;custodianName:string;status:'safe'|'captured';capturedBy:string|null;capturedByName:string|null;transferredAt:string|null;}

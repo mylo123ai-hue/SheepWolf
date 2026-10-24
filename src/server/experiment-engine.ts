@@ -2,11 +2,13 @@ import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import type Database from 'better-sqlite3';
 import { characters, scenarios } from './catalog.js';
+import { estimateDeepSeekCostUsd } from './provider-catalog.js';
+import type { ProviderRunLimits, ProviderUsageSnapshot, RunConfig } from '../shared/types.js';
+export type { RunConfig } from '../shared/types.js';
 
 export type Role = 'sheep' | 'wolf';
 export type RunStatus = 'running' | 'paused' | 'completed' | 'stopped' | 'failed' | 'incomplete_finalization';
 export type ActionType = 'post' | 'reply' | 'silence' | 'propose_ending' | 'ending_vote' | 'transfer_flag' | 'steal_flag' | 'change_opinion' | 'submit_verdict';
-export interface RunConfig { mode: 'demo'; paceMs: number; maxDurationMs: number; maxDecisions: number; minimumActionsPerParticipant: 2; }
 export interface AgentAction { type: ActionType; title?: string; body?: string; parentPostId?: number; vote?: 'agree' | 'disagree'; flagId?: string; targetCharacterId?: string; conclusionId?: string; }
 export interface AgentInvestigationContext {phase:'discussion'|'voting';title:string;mystery:string;evidence:string[];conclusions:{id:string;label:string;description:string}[];initialOpinionId:string;currentOpinionId:string;}
 export interface AgentContext {
@@ -18,8 +20,18 @@ export interface AgentContext {
   ownMemory: string[]; opportunities: number; decisionNumber: number; endingAvailable: boolean;
   proposalOpen: boolean; random: number;
 }
-export interface DecisionProvider { decide(context: AgentContext): AgentAction; }
-export interface EngineOptions { provider?: DecisionProvider; autoSchedule?: boolean; recoverOnStart?: boolean; now?: () => number; }
+export interface ProviderRequestEstimate {inputTokens:number;outputTokens:number;estimatedCostUsd:number;}
+export interface ProviderRequestResult {status:'succeeded'|'failed';requestId?:string;inputTokens?:number;outputTokens?:number;actualCostUsd?:number;elapsedMs:number;errorCode?:string;}
+export interface ProviderExecutionOptions {
+  model:string;limits:ProviderRunLimits;signal:AbortSignal;
+  reserve:(estimate:ProviderRequestEstimate)=>string;
+  settle:(reservationId:string,result:ProviderRequestResult)=>boolean;
+}
+export interface ProviderActionResult {action:AgentAction;providerRequestId?:string;inputTokens?:number;outputTokens?:number;elapsedMs?:number;}
+export type ProviderDecision=AgentAction|ProviderActionResult;
+export interface DecisionProvider { decide(context: AgentContext, options?:ProviderExecutionOptions): ProviderDecision|Promise<ProviderDecision>; }
+export interface EngineOptions { provider?: DecisionProvider; realProvider?:DecisionProvider; autoSchedule?: boolean; recoverOnStart?: boolean; now?: () => number; }
+class ProviderBudgetError extends Error {constructor(readonly code:string){super('Real AI usage limit reached before the next request.');}}
 export interface ExperimentParticipant { characterId:string; name:string; personality:string; role:Role; privateObjective:string; actionOpportunities:number; endingVote:'agree'|'disagree'|null; lastDecisionAt:string|null; recentAction:string|null; }
 export interface FlagRecord {flagId:string;originalOwnerId:string;originalOwnerName:string;custodianId:string;custodianName:string;status:'safe'|'captured';capturedBy:string|null;capturedByName:string|null;transferredAt:string|null;}
 export interface FlagTransfer {id:number;flagId:string;originalOwnerId:string;originalOwnerName:string;fromCharacterId:string;fromName:string;toCharacterId:string;toName:string;captured:boolean;createdAt:string;visibleTo:string[];}
@@ -29,11 +41,11 @@ export interface ExperimentSnapshot {
   id:string; scenarioId:string; status:RunStatus; config:RunConfig; roleSeed:string;
   createdAt:string; startedAt:string; endedAt:string|null; activeElapsedMs:number; decisionCount:number;
   outcome:unknown; stopReason:string|null; participants:ExperimentParticipant[];
-  postCount:number; replyCount:number; recentDecisions:{sequence:number;characterId:string;actionType:ActionType;createdAt:string;summary:string}[];scenarioState:CaptureTheFlagsState|InvestigationState|null;
+  postCount:number; replyCount:number; recentDecisions:{sequence:number;characterId:string;actionType:ActionType;createdAt:string;summary:string}[];scenarioState:CaptureTheFlagsState|InvestigationState|null;providerUsage:ProviderUsageSnapshot|null;
 }
 export interface PublicExperimentSnapshot { id:string;scenarioId:string;status:RunStatus;createdAt:string;startedAt:string;endedAt:string|null;activeElapsedMs:number;decisionCount:number;postCount:number;replyCount:number; }
 export interface ExperimentEvent { id:number; experimentId:string; sequence:number; type:string; payload:Record<string,unknown>; createdAt:string; audience:'public'|'observer'|'selected'; visibleTo:string[]; }
-type InternalRun = {id:string;scenario_id:string;status:RunStatus;config_json:string;role_seed:string;created_at:string;started_at:string;resumed_at:string|null;ended_at:string|null;active_elapsed_ms:number;decision_count:number;ending_proposed_at:string|null;ending_proposed_by:string|null;outcome_json:string|null;stop_reason:string|null};
+type InternalRun = {id:string;scenario_id:string;status:RunStatus;config_json:string;role_seed:string;created_at:string;started_at:string;resumed_at:string|null;ended_at:string|null;active_elapsed_ms:number;decision_count:number;ending_proposed_at:string|null;ending_proposed_by:string|null;outcome_json:string|null;stop_reason:string|null;control_version:number};
 type ParticipantRow = {character_id:string;name:string;personality:string;role:Role;private_objective:string;memory_json:string;action_opportunities:number;ending_vote:'agree'|'disagree'|null;last_decision_at:string|null;recent_action:string|null};
 type PostRow = {id:number;scenario_id:string;parent_id:number|null;author_id:string;title:string|null;body:string;created_at:string};
 type FlagRow = {experiment_id:string;flag_id:string;original_owner_id:string;custodian_id:string;status:'safe'|'captured';captured_by:string|null;transferred_at:string|null;original_owner_name:string;custodian_name:string;captured_by_name:string|null};
@@ -137,16 +149,18 @@ export class SimulatedDecisionProvider implements DecisionProvider {
 
 export class ExperimentEngine {
   private readonly provider:DecisionProvider;
+  private readonly realProvider:DecisionProvider|null;
   private readonly now:()=>number;
   private readonly events=new EventEmitter();
   private readonly busy=new Set<string>();
+  private readonly controllers=new Map<string,AbortController>();
   private timer:ReturnType<typeof setInterval>|null=null;
   constructor(private readonly db:Database.Database,options:EngineOptions={}) {
-    this.provider=options.provider??new SimulatedDecisionProvider();this.now=options.now??Date.now;
+    this.provider=options.provider??new SimulatedDecisionProvider();this.realProvider=options.realProvider??null;this.now=options.now??Date.now;
     if(options.recoverOnStart!==false)this.recoverInterruptedRuns();
     if(options.autoSchedule!==false)this.timer=setInterval(()=>this.tick(),250);
   }
-  close(){if(this.timer){clearInterval(this.timer);this.timer=null;}this.events.removeAllListeners();}
+  close(){if(this.timer){clearInterval(this.timer);this.timer=null;}if(this.controllers.size)this.db.prepare("UPDATE experiments SET control_version=control_version+1 WHERE status IN ('running','paused')").run();for(const controller of this.controllers.values())controller.abort();this.controllers.clear();this.events.removeAllListeners();}
   subscribe(listener:(event:ExperimentEvent)=>void){this.events.on('event',listener);return ()=>this.events.off('event',listener);}
   private publish(event:ExperimentEvent){this.events.emit('event',event);}
   private insertEvent(runId:string,type:string,payload:Record<string,unknown>,now:string,audience:'public'|'observer'|'selected'='observer',visibleTo:string[]=[]):ExperimentEvent {
@@ -157,13 +171,16 @@ export class ExperimentEngine {
   private publicEvent(runId:string,type:string,payload:Record<string,unknown>,now:string){return this.insertEvent(runId,type,payload,now,'public');}
   private elapsed(run:InternalRun):number{if(run.scenario_id==='the-investigation'&&this.investigationPhase(run.id)==='voting')return run.active_elapsed_ms;return run.active_elapsed_ms+(run.status==='running'&&run.resumed_at?Math.max(0,this.now()-Date.parse(run.resumed_at)):0);}
   private investigationPhase(id:string):InvestigationState['phase']|null{return (this.db.prepare('SELECT phase FROM investigation_runs WHERE experiment_id=?').get(id) as {phase:InvestigationState['phase']}|undefined)?.phase??null;}
-  createExperiment(input:{scenarioId:string;seed?:string;paceMs?:number;maxDurationMs?:number;maxDecisions?:number}):ExperimentSnapshot {
+  createExperiment(input:{scenarioId:string;seed?:string;paceMs?:number;maxDurationMs?:number;maxDecisions?:number;mode?:'demo'|'real';provider?:RunConfig['provider']}):ExperimentSnapshot {
     if(!scenarios.some(s=>s.id===input.scenarioId&&s.status==='playable'))throw new Error('Choose an available scenario.');
     if(this.db.prepare("SELECT id FROM experiments WHERE status IN ('running','paused') LIMIT 1").get())throw new Error('There is already an active experiment. Stop or finish it before starting another.');
-    const config:RunConfig={mode:'demo',paceMs:input.paceMs??1800,maxDurationMs:input.maxDurationMs??20*60_000,maxDecisions:input.maxDecisions??100,minimumActionsPerParticipant:2};
+    const mode=input.mode??'demo';
+    if(mode==='real'&&(!input.provider||input.provider.provider!=='deepseek'||!['deepseek-flash','deepseek-v4-pro'].includes(input.provider.model)))throw new Error('Configure a supported DeepSeek model before starting a real AI run.');
+    const config:RunConfig={mode,paceMs:input.paceMs??1800,maxDurationMs:input.maxDurationMs??20*60_000,maxDecisions:input.maxDecisions??100,minimumActionsPerParticipant:2,...(mode==='real'?{provider:input.provider}: {})};
     if(!Number.isInteger(config.paceMs)||config.paceMs<100||config.paceMs>30_000)throw new Error('Decision pace must be between 100 ms and 30 seconds.');
     if(!Number.isInteger(config.maxDurationMs)||config.maxDurationMs<1_000||config.maxDurationMs>24*60*60_000)throw new Error('Duration limit is out of range.');
     if(!Number.isInteger(config.maxDecisions)||config.maxDecisions<1||config.maxDecisions>10_000)throw new Error('Decision limit is out of range.');
+    if(mode==='real'&&(!config.provider||!this.validProviderLimits(config.provider.limits)))throw new Error('Real AI limits are invalid.');
     const seed=input.seed??randomUUID();const roles=assignRoles(seed);const id=randomUUID();const now=new Date(this.now()).toISOString();
     const events:ExperimentEvent[]=[];
     this.db.transaction(()=>{
@@ -184,7 +201,7 @@ export class ExperimentEngine {
         const {correctConclusionId:_correct,wolfTargetId:_target,...publicCase}=investigationCase;
         events.push(this.publicEvent(id,'investigation.initialized',publicCase,now));
       }
-      events.push(this.publicEvent(id,'run.started',{scenarioId:input.scenarioId,mode:'demo',participantCount:7},now));
+      events.push(this.publicEvent(id,'run.started',{scenarioId:input.scenarioId,mode,participantCount:7},now));
     })();
     events.forEach(e=>this.publish(e));return this.getExperiment(id);
   }
@@ -196,7 +213,45 @@ export class ExperimentEngine {
     const participants:ExperimentParticipant[]=participantRows.map(p=>({characterId:p.character_id,name:p.name,personality:p.personality,role:p.role,privateObjective:p.private_objective,actionOpportunities:p.action_opportunities,endingVote:p.ending_vote,lastDecisionAt:p.last_decision_at,recentAction:p.recent_action}));
     const counts=this.db.prepare('SELECT count(*) AS posts, sum(CASE WHEN parent_id IS NOT NULL THEN 1 ELSE 0 END) AS replies FROM forum_posts WHERE experiment_id=?').get(id) as {posts:number;replies:number|null};
     const recent=this.db.prepare('SELECT sequence,character_id,action_type,created_at,result_json FROM agent_decisions WHERE experiment_id=? ORDER BY sequence DESC LIMIT 12').all(id) as {sequence:number;character_id:string;action_type:ActionType;created_at:string;result_json:string}[];
-    return {id:run.id,scenarioId:run.scenario_id,status:run.status,config:JSON.parse(run.config_json),roleSeed:run.role_seed,createdAt:run.created_at,startedAt:run.started_at,endedAt:run.ended_at,activeElapsedMs:this.elapsed(run),decisionCount:run.decision_count,outcome:run.outcome_json?JSON.parse(run.outcome_json):null,stopReason:run.stop_reason,participants,postCount:counts.posts,replyCount:counts.replies??0,recentDecisions:recent.reverse().map(d=>({sequence:d.sequence,characterId:d.character_id,actionType:d.action_type,createdAt:d.created_at,summary:(JSON.parse(d.result_json) as {summary:string}).summary})),scenarioState:run.scenario_id==='capture-the-flags'?this.getCaptureTheFlagsState(id):run.scenario_id==='the-investigation'?this.getInvestigationState(id):null};
+    const config=JSON.parse(run.config_json) as RunConfig;
+    return {id:run.id,scenarioId:run.scenario_id,status:run.status,config,roleSeed:run.role_seed,createdAt:run.created_at,startedAt:run.started_at,endedAt:run.ended_at,activeElapsedMs:this.elapsed(run),decisionCount:run.decision_count,outcome:run.outcome_json?JSON.parse(run.outcome_json):null,stopReason:run.stop_reason,participants,postCount:counts.posts,replyCount:counts.replies??0,recentDecisions:recent.reverse().map(d=>({sequence:d.sequence,characterId:d.character_id,actionType:d.action_type,createdAt:d.created_at,summary:(JSON.parse(d.result_json) as {summary:string}).summary})),scenarioState:run.scenario_id==='capture-the-flags'?this.getCaptureTheFlagsState(id):run.scenario_id==='the-investigation'?this.getInvestigationState(id):null,providerUsage:config.mode==='real'&&config.provider?this.getProviderUsage(id,config.provider.model,config.provider.limits):null};
+  }
+  private validProviderLimits(limits:ProviderRunLimits){return Number.isInteger(limits.maxRequests)&&limits.maxRequests>=1&&limits.maxRequests<=500&&Number.isInteger(limits.maxInputTokens)&&limits.maxInputTokens>=1&&limits.maxInputTokens<=10_000_000&&Number.isInteger(limits.maxOutputTokens)&&limits.maxOutputTokens>=1&&limits.maxOutputTokens<=1_000_000&&Number.isInteger(limits.maxOutputTokensPerRequest)&&limits.maxOutputTokensPerRequest>=1&&limits.maxOutputTokensPerRequest<=8192&&limits.maxOutputTokensPerRequest<=limits.maxOutputTokens&&Number.isFinite(limits.maxEstimatedUsd)&&limits.maxEstimatedUsd>0&&limits.maxEstimatedUsd<=100;}
+  private providerUsageTotals(id:string){
+    return this.db.prepare(`SELECT
+      sum(CASE WHEN status<>'budget_rejected' THEN 1 ELSE 0 END) AS requests,
+      sum(CASE WHEN status<>'budget_rejected' THEN coalesce(input_tokens,estimated_input_tokens) ELSE 0 END) AS input_tokens,
+      sum(CASE WHEN status<>'budget_rejected' THEN coalesce(output_tokens,reserved_output_tokens) ELSE 0 END) AS output_tokens,
+      sum(CASE WHEN status<>'budget_rejected' THEN coalesce(actual_cost_usd,reserved_cost_usd) ELSE 0 END) AS estimated_usd
+      FROM provider_requests WHERE experiment_id=?`).get(id) as {requests:number|null;input_tokens:number|null;output_tokens:number|null;estimated_usd:number|null};
+  }
+  private getProviderUsage(id:string,model:string,limits:ProviderRunLimits):ProviderUsageSnapshot{
+    const row=this.providerUsageTotals(id);return {requests:row.requests??0,inputTokens:row.input_tokens??0,outputTokens:row.output_tokens??0,estimatedUsd:Math.round((row.estimated_usd??0)*1_000_000)/1_000_000,model,limits};
+  }
+  private reserveProviderRequest(id:string,controlVersion:number,expectedStatus:RunStatus,config:RunConfig,estimate:ProviderRequestEstimate){
+    const reservationId=randomUUID();const now=new Date(this.now()).toISOString();const provider=config.provider!;const emitted:ExperimentEvent[]=[];
+    this.db.transaction(()=>{
+      const current=this.db.prepare('SELECT * FROM experiments WHERE id=?').get(id) as InternalRun|undefined;
+      if(!current||current.status!==expectedStatus||current.control_version!==controlVersion)throw new ProviderBudgetError('run_changed');
+      if(current.status==='running'&&!(current.scenario_id==='the-investigation'&&this.investigationPhase(id)==='voting')&&this.elapsed(current)>=config.maxDurationMs)throw new ProviderBudgetError('active_time_limit');
+      const totals=this.providerUsageTotals(id);const isOver=(totals.requests??0)>=provider.limits.maxRequests||(totals.input_tokens??0)+estimate.inputTokens>provider.limits.maxInputTokens||(totals.output_tokens??0)+estimate.outputTokens>provider.limits.maxOutputTokens||(totals.estimated_usd??0)+estimate.estimatedCostUsd>provider.limits.maxEstimatedUsd;
+      this.db.prepare(`INSERT INTO provider_requests (id,experiment_id,model_id,status,estimated_input_tokens,reserved_output_tokens,reserved_cost_usd,created_at,completed_at,error_code)
+        VALUES (?,?,?, ?,?,?,?, ?,?,?)`).run(reservationId,id,provider.model,isOver?'budget_rejected':'reserved',estimate.inputTokens,estimate.outputTokens,estimate.estimatedCostUsd,now,isOver?now:null,isOver?'budget_exceeded':null);
+      if(isOver)emitted.push(this.insertEvent(id,'provider.request_rejected',{model:provider.model,code:'budget_exceeded'},now));
+      else emitted.push(this.insertEvent(id,'provider.request_reserved',{model:provider.model,estimatedInputTokens:estimate.inputTokens,reservedOutputTokens:estimate.outputTokens},now));
+    })();emitted.forEach(event=>this.publish(event));
+    if(emitted.some(event=>event.type==='provider.request_rejected'))throw new ProviderBudgetError('budget_exceeded');
+    return reservationId;
+  }
+  private settleProviderRequest(id:string,reservationId:string,result:ProviderRequestResult){
+    const now=new Date(this.now()).toISOString();const emitted:ExperimentEvent[]=[];
+    this.db.transaction(()=>{
+      const update=this.db.prepare(`UPDATE provider_requests SET status=?,input_tokens=?,output_tokens=?,actual_cost_usd=?,provider_request_id=?,elapsed_ms=?,error_code=?,completed_at=? WHERE id=? AND experiment_id=? AND status='reserved'`)
+        .run(result.status,result.inputTokens??null,result.outputTokens??null,result.actualCostUsd??null,result.requestId?.slice(0,200)??null,Math.max(0,Math.floor(result.elapsedMs)),result.errorCode?.replace(/[^a-z0-9_.-]/gi,'_').slice(0,60)??null,now,reservationId,id);
+      if(update.changes===1)emitted.push(this.insertEvent(id,'provider.request_settled',{status:result.status,model:(this.db.prepare('SELECT model_id FROM provider_requests WHERE id=?').get(reservationId) as {model_id:string}).model_id,requestId:result.requestId?.slice(0,200)??null,elapsedMs:Math.max(0,Math.floor(result.elapsedMs)),errorCode:result.errorCode??null},now));
+    })();emitted.forEach(event=>this.publish(event));
+    const run=this.db.prepare('SELECT config_json FROM experiments WHERE id=?').get(id) as {config_json:string};const config=JSON.parse(run.config_json) as RunConfig;const limits=config.provider!.limits;const totals=this.providerUsageTotals(id);
+    return (totals.requests??0)<=limits.maxRequests&&(totals.input_tokens??0)<=limits.maxInputTokens&&(totals.output_tokens??0)<=limits.maxOutputTokens&&(totals.estimated_usd??0)<=limits.maxEstimatedUsd;
   }
   getCaptureTheFlagsState(id:string):CaptureTheFlagsState {
     if(!this.db.prepare("SELECT id FROM experiments WHERE id=? AND scenario_id='capture-the-flags'").get(id))throw new Error('Capture the Flags state is unavailable for this experiment.');
@@ -233,12 +288,18 @@ export class ExperimentEngine {
     return (rows as {id:number;experiment_id:string;sequence:number;event_type:string;payload_json:string;created_at:string;audience:'public'|'observer'|'selected';visible_to_json:string}[]).map(e=>({id:e.id,experimentId:e.experiment_id,sequence:e.sequence,type:e.event_type,payload:JSON.parse(e.payload_json),createdAt:e.created_at,audience:e.audience,visibleTo:JSON.parse(e.visible_to_json) as string[]}));
   }
   getForumRows(id:string):PostRow[] {if(!this.db.prepare('SELECT id FROM experiments WHERE id=?').get(id))throw new Error('Experiment not found.');return this.db.prepare('SELECT id,scenario_id,parent_id,author_id,title,body,created_at FROM forum_posts WHERE experiment_id=? ORDER BY id').all(id) as PostRow[];}
-  pause(id:string):ExperimentSnapshot {const run=this.requireRun(id,'running');const now=this.now();const elapsed=this.elapsed(run);const config=JSON.parse(run.config_json) as RunConfig;if(!(run.scenario_id==='the-investigation'&&this.investigationPhase(id)==='voting')&&elapsed>=config.maxDurationMs){this.completeAtLimit(id,'active_time_limit');return this.getExperiment(id);}const events:ExperimentEvent[]=[];this.db.transaction(()=>{this.db.prepare("UPDATE experiments SET status='paused',active_elapsed_ms=?,resumed_at=NULL WHERE id=? AND status='running'").run(elapsed,id);events.push(this.publicEvent(id,'run.paused',{activeElapsedMs:elapsed},new Date(now).toISOString()));})();events.forEach(e=>this.publish(e));return this.getExperiment(id);}
-  resume(id:string):ExperimentSnapshot {this.requireRun(id,'paused');const now=new Date(this.now()).toISOString();const events:ExperimentEvent[]=[];this.db.transaction(()=>{this.db.prepare("UPDATE experiments SET status='running',resumed_at=? WHERE id=? AND status='paused'").run(now,id);events.push(this.publicEvent(id,'run.resumed',{},now));})();events.forEach(e=>this.publish(e));return this.getExperiment(id);}
-  stop(id:string,reason='administrator_stop'):ExperimentSnapshot {const run=this.requireRun(id,'running','paused');const elapsed=this.elapsed(run);const now=new Date(this.now()).toISOString();const events:ExperimentEvent[]=[];this.db.transaction(()=>{this.db.prepare("UPDATE experiments SET status='stopped',active_elapsed_ms=?,resumed_at=NULL,ended_at=?,stop_reason=?,outcome_json=NULL WHERE id=?").run(elapsed,now,reason,id);events.push(this.publicEvent(id,'run.stopped',{reason,activeElapsedMs:elapsed},now));})();events.forEach(e=>this.publish(e));return this.getExperiment(id);}
-  step(id:string):ExperimentSnapshot {this.requireRun(id,'paused');this.executeOne(id,true);return this.getExperiment(id);}
+  pause(id:string):ExperimentSnapshot {const run=this.requireRun(id,'running');const now=this.now();const elapsed=this.elapsed(run);const config=JSON.parse(run.config_json) as RunConfig;if(!(run.scenario_id==='the-investigation'&&this.investigationPhase(id)==='voting')&&elapsed>=config.maxDurationMs){this.completeAtLimit(id,'active_time_limit');this.cancelInFlight(id);return this.getExperiment(id);}const events:ExperimentEvent[]=[];this.db.transaction(()=>{this.db.prepare("UPDATE experiments SET status='paused',active_elapsed_ms=?,resumed_at=NULL,control_version=control_version+1 WHERE id=? AND status='running'").run(elapsed,id);events.push(this.publicEvent(id,'run.paused',{activeElapsedMs:elapsed},new Date(now).toISOString()));})();this.cancelInFlight(id);events.forEach(e=>this.publish(e));return this.getExperiment(id);}
+  resume(id:string):ExperimentSnapshot {this.requireRun(id,'paused');const now=new Date(this.now()).toISOString();const events:ExperimentEvent[]=[];this.db.transaction(()=>{this.db.prepare("UPDATE experiments SET status='running',resumed_at=?,control_version=control_version+1 WHERE id=? AND status='paused'").run(now,id);events.push(this.publicEvent(id,'run.resumed',{},now));})();this.cancelInFlight(id);events.forEach(e=>this.publish(e));return this.getExperiment(id);}
+  stop(id:string,reason='administrator_stop'):ExperimentSnapshot {const run=this.requireRun(id,'running','paused');const elapsed=this.elapsed(run);const now=new Date(this.now()).toISOString();const events:ExperimentEvent[]=[];this.db.transaction(()=>{this.db.prepare("UPDATE experiments SET status='stopped',active_elapsed_ms=?,resumed_at=NULL,ended_at=?,stop_reason=?,outcome_json=NULL,control_version=control_version+1 WHERE id=?").run(elapsed,now,reason,id);events.push(this.publicEvent(id,'run.stopped',{reason,activeElapsedMs:elapsed},now));})();this.cancelInFlight(id);events.forEach(e=>this.publish(e));return this.getExperiment(id);}
+  disableRealRuns(){
+    const rows=this.db.prepare("SELECT * FROM experiments WHERE status IN ('running','paused')").all() as InternalRun[];const events:ExperimentEvent[]=[];
+    this.db.transaction(()=>{for(const run of rows){const config=JSON.parse(run.config_json) as RunConfig;if(config.mode!=='real')continue;const now=new Date(this.now()).toISOString();const elapsed=this.elapsed(run);this.db.prepare("UPDATE experiments SET status='paused',active_elapsed_ms=?,resumed_at=NULL,control_version=control_version+1 WHERE id=? AND status IN ('running','paused')").run(elapsed,run.id);events.push(this.publicEvent(run.id,'provider.real_mode_disabled',{status:'paused'},now));}})();
+    for(const event of events){this.cancelInFlight(event.experimentId);this.publish(event);}
+  }
+  async step(id:string):Promise<ExperimentSnapshot> {this.requireRun(id,'paused');await this.executeOne(id,true);return this.getExperiment(id);}
+  private cancelInFlight(id:string){this.controllers.get(id)?.abort();}
   private requireRun(id:string,...statuses:RunStatus[]):InternalRun {const run=this.db.prepare('SELECT * FROM experiments WHERE id=?').get(id) as InternalRun|undefined;if(!run)throw new Error('Experiment not found.');if(!statuses.includes(run.status))throw new Error(`Experiment is ${run.status}; this control is not available.`);return run;}
-  tick(){if(this.busy.size)return;const rows=this.db.prepare("SELECT * FROM experiments WHERE status='running' ORDER BY created_at").all() as InternalRun[];for(const run of rows){if(this.busy.size)break;const elapsed=this.elapsed(run);const config=JSON.parse(run.config_json) as RunConfig;const finalizing=run.scenario_id==='the-investigation'&&this.investigationPhase(run.id)==='voting';if(!finalizing&&elapsed>=config.maxDurationMs){this.completeAtLimit(run.id,'active_time_limit');continue;}if(!finalizing)this.db.prepare("UPDATE experiments SET active_elapsed_ms=?,resumed_at=? WHERE id=? AND status='running'").run(elapsed,new Date(this.now()).toISOString(),run.id);const last=this.db.prepare('SELECT created_at FROM agent_decisions WHERE experiment_id=? ORDER BY sequence DESC LIMIT 1').get(run.id) as {created_at:string}|undefined;const dueAt=last?Date.parse(last.created_at):Date.parse(run.started_at);if(this.now()-dueAt>=config.paceMs)this.executeOne(run.id,false);}}
+  async tick(){if(this.busy.size)return;const rows=this.db.prepare("SELECT * FROM experiments WHERE status='running' ORDER BY created_at").all() as InternalRun[];for(const run of rows){if(this.busy.size)break;const elapsed=this.elapsed(run);const config=JSON.parse(run.config_json) as RunConfig;const finalizing=run.scenario_id==='the-investigation'&&this.investigationPhase(run.id)==='voting';if(!finalizing&&elapsed>=config.maxDurationMs){this.completeAtLimit(run.id,'active_time_limit');continue;}if(!finalizing)this.db.prepare("UPDATE experiments SET active_elapsed_ms=?,resumed_at=? WHERE id=? AND status='running'").run(elapsed,new Date(this.now()).toISOString(),run.id);const last=this.db.prepare('SELECT created_at FROM agent_decisions WHERE experiment_id=? ORDER BY sequence DESC LIMIT 1').get(run.id) as {created_at:string}|undefined;const dueAt=last?Date.parse(last.created_at):Date.parse(run.started_at);if(this.now()-dueAt>=config.paceMs){await this.executeOne(run.id,false);break;}}}
   private chooseParticipant(runId:string,seed:string,sequence:number):ParticipantRow|undefined {
     const rows=this.db.prepare(`SELECT p.character_id,p.role,p.private_objective,p.memory_json,p.action_opportunities,p.ending_vote,p.last_decision_at,p.recent_action,c.name,c.personality
       FROM experiment_participants p JOIN characters c ON c.id=p.character_id WHERE p.experiment_id=?`).all(runId) as ParticipantRow[];
@@ -249,25 +310,42 @@ export class ExperimentEngine {
     const min=Math.min(...eligible.map(p=>p.action_opportunities));eligible=eligible.filter(p=>p.action_opportunities===min);
     eligible.sort((a,b)=>hash32(`${seed}:${sequence}:${a.character_id}`)-hash32(`${seed}:${sequence}:${b.character_id}`));return eligible[0];
   }
-  private executeOne(id:string,manual:boolean){
-    if(this.busy.has(id))throw new Error('An agent decision is already in progress.');this.busy.add(id);
+  private async executeOne(id:string,manual:boolean){
+    if(this.busy.has(id))throw new Error('An agent decision is already in progress.');
+    const expectedStatus:RunStatus=manual?'paused':'running';const run=this.requireRun(id,expectedStatus);const config=JSON.parse(run.config_json) as RunConfig;
+    this.busy.add(id);const controller=new AbortController();this.controllers.set(id,controller);
     try {
-      const run=this.requireRun(id,manual?'paused':'running');const config=JSON.parse(run.config_json) as RunConfig;
       if(run.scenario_id==='the-investigation'&&this.investigationPhase(id)==='discussion'&&config.maxDecisions-run.decision_count<=5){this.startInvestigationFinalization(id,'decision_limit');if(this.investigationPhase(id)!=='voting')return;}
       if(run.decision_count>=config.maxDecisions){this.completeAtLimit(id,'decision_limit');return;}
       const participant=this.chooseParticipant(id,run.role_seed,run.decision_count+1);if(!participant)return;
       const random=randomFrom(`${run.role_seed}:${run.decision_count+1}:${participant.character_id}`)();
-      const context=participantContext(this.db,id,participant.character_id,random);const action=this.provider.decide(context);this.validateAction(action,context);
+      const context=participantContext(this.db,id,participant.character_id,random);
+      const provider=config.mode==='real'?this.realProvider:this.provider;
+      if(!provider)throw Object.assign(new Error('No real AI provider is configured for this run.'),{safeMessage:'No real AI provider is configured for this run.',code:'provider_unavailable'});
+      const providerOptions:ProviderExecutionOptions|undefined=config.mode==='real'&&config.provider?{
+        model:config.provider.model,limits:config.provider.limits,signal:controller.signal,
+        reserve:estimate=>this.reserveProviderRequest(id,run.control_version,expectedStatus,config,estimate),
+        settle:(reservationId,result)=>this.settleProviderRequest(id,reservationId,result)
+      }:undefined;
+      const decision=await provider.decide(context,providerOptions);
+      if(config.mode==='real'&&!manual&&!(run.scenario_id==='the-investigation'&&this.investigationPhase(id)==='voting')){
+        const current=this.db.prepare('SELECT * FROM experiments WHERE id=?').get(id) as InternalRun|undefined;
+        if(current&&current.status===expectedStatus&&current.control_version===run.control_version&&this.elapsed(current)>=config.maxDurationMs){this.completeAtLimit(id,'active_time_limit');return;}
+      }
+      const wrapped=typeof decision==='object'&&decision!==null&&'action' in decision;
+      const action=wrapped?(decision as ProviderActionResult).action:decision as AgentAction;
+      const providerResult=wrapped?decision as ProviderActionResult:null;
+      this.validateAction(action,context);
       const now=new Date(this.now()).toISOString();const sequence=run.decision_count+1;const emitted:ExperimentEvent[]=[];
       this.db.transaction(()=>{
-        const current=this.db.prepare('SELECT status,decision_count,ending_proposed_at FROM experiments WHERE id=?').get(id) as {status:RunStatus;decision_count:number;ending_proposed_at:string|null};
-        if(current.decision_count!==run.decision_count||current.status!==(manual?'paused':'running'))throw new Error('Run changed while a decision was being prepared.');
+        const current=this.db.prepare('SELECT status,decision_count,ending_proposed_at,control_version FROM experiments WHERE id=?').get(id) as {status:RunStatus;decision_count:number;ending_proposed_at:string|null;control_version:number};
+        if(current.decision_count!==run.decision_count||current.status!==expectedStatus||current.control_version!==run.control_version)throw new Error('Run changed while a decision was being prepared.');
         const resultPayload=this.applyAction(id,participant,action,context,current,now,sequence,emitted);
         const summary=resultPayload.summary;
-        this.db.prepare('INSERT INTO agent_decisions (experiment_id,sequence,character_id,action_type,input_json,result_json,created_at) VALUES (?,?,?,?,?,?,?)').run(id,sequence,participant.character_id,action.type,JSON.stringify({recentMessageCount:context.recentMessages.length,ownMemoryItems:context.ownMemory.length,endingAvailable:context.endingAvailable}),JSON.stringify(resultPayload),now);
+        this.db.prepare('INSERT INTO agent_decisions (experiment_id,sequence,character_id,action_type,input_json,result_json,created_at) VALUES (?,?,?,?,?,?,?)').run(id,sequence,participant.character_id,action.type,JSON.stringify({recentMessageCount:context.recentMessages.length,ownMemoryItems:context.ownMemory.length,endingAvailable:context.endingAvailable,...(providerResult?{provider:config.mode,model:config.provider?.model,requestId:providerResult.providerRequestId??null,inputTokens:providerResult.inputTokens??null,outputTokens:providerResult.outputTokens??null,elapsedMs:providerResult.elapsedMs??null}:{})}),JSON.stringify(resultPayload),now);
         const memory=[...context.ownMemory,summary].slice(-8);
         this.db.prepare('UPDATE experiment_participants SET memory_json=?,action_opportunities=action_opportunities+1,last_decision_at=?,recent_action=? WHERE experiment_id=? AND character_id=?').run(JSON.stringify(memory),now,action.type,id,participant.character_id);
-        const nextCount=sequence;this.db.prepare('UPDATE experiments SET decision_count=? WHERE id=?').run(nextCount,id);
+        const nextCount=sequence;this.db.prepare('UPDATE experiments SET decision_count=? WHERE id=? AND control_version=?').run(nextCount,id,run.control_version);
         emitted.push(this.insertEvent(id,'agent.decision',{sequence,characterId:participant.character_id,actionType:action.type,summary,actionOpportunities:participant.action_opportunities+1},now));
         if(action.type==='propose_ending'){
           this.db.prepare('UPDATE experiments SET ending_proposed_at=?,ending_proposed_by=? WHERE id=?').run(now,participant.character_id,id);
@@ -287,8 +365,18 @@ export class ExperimentEngine {
         const afterTerminal=this.db.prepare('SELECT status FROM experiments WHERE id=?').get(id) as {status:RunStatus};
         if((afterTerminal.status==='running'||afterTerminal.status==='paused')&&sequence>=config.maxDecisions){if(run.scenario_id==='the-investigation'){if(this.investigationPhase(id)==='voting')this.markIncompleteInvestigation(id,'decision_limit',now,emitted);else this.beginInvestigationFinalization(id,'decision_limit',now,emitted,this.elapsed(this.db.prepare('SELECT * FROM experiments WHERE id=?').get(id) as InternalRun));}else this.finishValidConclusion(id,'decision_limit',now,emitted);}
       })();emitted.forEach(e=>this.publish(e));
-    } catch(error){if(!manual){const message=error instanceof Error?error.message:'Unknown decision failure';this.fail(id,message);}else throw error;}
-    finally{this.busy.delete(id);}
+    } catch(error){
+      const current=this.db.prepare('SELECT status,control_version FROM experiments WHERE id=?').get(id) as {status:RunStatus;control_version:number}|undefined;
+      if(!current||current.status!==expectedStatus||current.control_version!==run.control_version)return;
+      if(config.mode==='real'){
+        if(error instanceof ProviderBudgetError&&error.code==='active_time_limit'&&expectedStatus==='running'){this.completeAtLimit(id,'active_time_limit');return;}
+        const safe=(error as {safeMessage?:unknown})?.safeMessage;
+        const message=typeof safe==='string'?safe:error instanceof ProviderBudgetError?error.message:'The real AI decision failed. Check provider settings and limits.';
+        this.fail(id,message);return;
+      }
+      if(!manual){const message=error instanceof Error?error.message:'Unknown decision failure';this.fail(id,message);}else throw error;
+    }
+    finally{if(this.controllers.get(id)===controller)this.controllers.delete(id);this.busy.delete(id);}
   }
   private validateAction(action:AgentAction,context:AgentContext){
     if(!['post','reply','silence','propose_ending','ending_vote','transfer_flag','steal_flag','change_opinion','submit_verdict'].includes(action.type))throw new Error('Agent selected an unsupported action.');
@@ -422,8 +510,19 @@ export class ExperimentEngine {
     events.push(this.publicEvent(id,'run.completed',outcome,now));
   }
   private completeAtLimit(id:string,reason:string){const run=this.requireRun(id,'running');const now=new Date(this.now()).toISOString();const elapsed=this.elapsed(run);const events:ExperimentEvent[]=[];this.db.transaction(()=>{this.db.prepare('UPDATE experiments SET active_elapsed_ms=? WHERE id=?').run(elapsed,id);if(run.scenario_id==='the-investigation'){if(this.investigationPhase(id)==='voting')this.markIncompleteInvestigation(id,reason,now,events);else this.beginInvestigationFinalization(id,reason,now,events,elapsed);}else this.finishValidConclusion(id,reason,now,events);})();events.forEach(e=>this.publish(e));}
-  private fail(id:string,message:string){const row=this.db.prepare("SELECT * FROM experiments WHERE id=? AND status='running'").get(id) as InternalRun|undefined;if(!row)return;const now=new Date(this.now()).toISOString();const events:ExperimentEvent[]=[];this.db.transaction(()=>{this.db.prepare("UPDATE experiments SET status='failed',ended_at=?,resumed_at=NULL,stop_reason=?,outcome_json=NULL WHERE id=?").run(now,message.slice(0,300),id);events.push(this.insertEvent(id,'run.failed',{message:message.slice(0,300)},now));})();events.forEach(e=>this.publish(e));}
-  recoverInterruptedRuns(){const runs=this.db.prepare("SELECT * FROM experiments WHERE status='running'").all() as InternalRun[];for(const run of runs){const now=new Date(this.now()).toISOString();this.db.transaction(()=>{this.db.prepare("UPDATE experiments SET status='paused',resumed_at=NULL WHERE id=? AND status='running'").run(run.id);this.insertEvent(run.id,'run.recovered',{status:'paused',activeElapsedMs:run.active_elapsed_ms},now);})();}}
+  private fail(id:string,message:string){const row=this.db.prepare("SELECT * FROM experiments WHERE id=? AND status IN ('running','paused')").get(id) as InternalRun|undefined;if(!row)return;const now=new Date(this.now()).toISOString();const safeMessage=message.replace(/[\r\n\t]/g,' ').slice(0,300);const elapsed=this.elapsed(row);const events:ExperimentEvent[]=[];this.db.transaction(()=>{this.db.prepare("UPDATE experiments SET status='failed',active_elapsed_ms=?,ended_at=?,resumed_at=NULL,stop_reason=?,outcome_json=NULL,control_version=control_version+1 WHERE id=? AND status IN ('running','paused')").run(elapsed,now,safeMessage,id);events.push(this.insertEvent(id,'run.failed',{message:safeMessage},now));})();events.forEach(e=>this.publish(e));}
+  recoverInterruptedRuns(){
+    const runs=this.db.prepare("SELECT * FROM experiments WHERE status='running'").all() as InternalRun[];
+    const reservations=this.db.prepare("SELECT id,experiment_id,model_id FROM provider_requests WHERE status='reserved'").all() as {id:string;experiment_id:string;model_id:string}[];
+    const now=new Date(this.now()).toISOString();
+    this.db.transaction(()=>{
+      for(const reservation of reservations){
+        const settled=this.db.prepare("UPDATE provider_requests SET status='failed',error_code='interrupted',completed_at=? WHERE id=? AND status='reserved'").run(now,reservation.id);
+        if(settled.changes===1)this.insertEvent(reservation.experiment_id,'provider.request_settled',{status:'failed',model:reservation.model_id,requestId:null,errorCode:'interrupted'},now);
+      }
+      for(const run of runs){this.db.prepare("UPDATE experiments SET status='paused',resumed_at=NULL,control_version=control_version+1 WHERE id=? AND status='running'").run(run.id);this.insertEvent(run.id,'run.recovered',{status:'paused',activeElapsedMs:run.active_elapsed_ms},now);}
+    })();
+  }
 }
 
 export function participantSafeSummary(snapshot:ExperimentSnapshot):PublicExperimentSnapshot {const {id,scenarioId,status,createdAt,startedAt,endedAt,activeElapsedMs,decisionCount,postCount,replyCount}=snapshot;return {id,scenarioId,status,createdAt,startedAt,endedAt,activeElapsedMs,decisionCount,postCount,replyCount};}
