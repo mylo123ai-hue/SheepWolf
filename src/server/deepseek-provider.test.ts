@@ -51,6 +51,50 @@ describe('DeepSeek provider adapter (mock transport only)',()=>{
     expect(fetcher).toHaveBeenCalledTimes(1);expect(settled).toMatchObject([{status:'failed',errorCode:'malformed_output'}]);
   });
 
+  it('retries a truncated length response once and accepts only the complete second decision',async()=>{
+    const {context}=fixture();const apiKey=await vault();
+    const partial=response('',{choices:[{message:{content:'{"type":"post","title":"truncated'},finish_reason:'length'}],usage:{prompt_tokens:34,completion_tokens:128}});
+    const fetcher=vi.fn<typeof fetch>().mockResolvedValueOnce(partial).mockResolvedValueOnce(response({type:'silence'}));
+    const provider=new DeepSeekDecisionProvider({vault:apiKey,settings:{realModeEnabled:()=>true},fetcher});const reserved:ProviderRequestEstimate[]=[];const settled:ProviderRequestResult[]=[];
+    const result=await provider.decide(context,execution({},reserved,settled));
+    expect(result.action).toEqual({type:'silence'});expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(reserved).toHaveLength(2);expect(reserved[1]).toEqual(reserved[0]);
+    expect(settled).toHaveLength(2);expect(settled[0]).toMatchObject({status:'failed',outputTokens:128,errorCode:'finish_length'});
+    expect(settled[1]).toMatchObject({status:'succeeded',outputTokens:4});
+  });
+
+  it('stops after the single allowed retry when the next response is still truncated',async()=>{
+    const {context}=fixture();const apiKey=await vault();
+    const fetcher=vi.fn<typeof fetch>(async()=>response('',{choices:[{message:{content:'{"type":"silence"}'},finish_reason:'length'}]}));
+    const provider=new DeepSeekDecisionProvider({vault:apiKey,settings:{realModeEnabled:()=>true},fetcher});const reserved:ProviderRequestEstimate[]=[];const settled:ProviderRequestResult[]=[];
+    await expect(provider.decide(context,execution({},reserved,settled))).rejects.toMatchObject({code:'incomplete_output'});
+    expect(fetcher).toHaveBeenCalledTimes(2);expect(reserved).toHaveLength(2);expect(settled).toHaveLength(2);
+    expect(settled.every(item=>item.status==='failed'&&item.errorCode==='finish_length')).toBe(true);
+  });
+
+  it('does not retry other non-stop finish reasons',async()=>{
+    const {context}=fixture();const apiKey=await vault();
+    const fetcher=vi.fn<typeof fetch>(async()=>response('',{choices:[{message:{content:'{"type":"silence"}'},finish_reason:'content_filter'}]}));
+    const provider=new DeepSeekDecisionProvider({vault:apiKey,settings:{realModeEnabled:()=>true},fetcher});const settled:ProviderRequestResult[]=[];
+    await expect(provider.decide(context,execution({},[],settled))).rejects.toMatchObject({code:'incomplete_output'});
+    expect(fetcher).toHaveBeenCalledTimes(1);expect(settled).toMatchObject([{status:'failed',errorCode:'finish_content_filter'}]);
+  });
+
+  it('rejects a missing finish reason instead of treating unknown completion as complete',async()=>{
+    const {context}=fixture();const apiKey=await vault();
+    const fetcher=vi.fn<typeof fetch>(async()=>response({type:'silence'},{choices:[{message:{content:'{"type":"silence"}'},finish_reason:null}]}));
+    const provider=new DeepSeekDecisionProvider({vault:apiKey,settings:{realModeEnabled:()=>true},fetcher});const settled:ProviderRequestResult[]=[];
+    await expect(provider.decide(context,execution({},[],settled))).rejects.toMatchObject({code:'incomplete_output'});
+    expect(fetcher).toHaveBeenCalledTimes(1);expect(settled).toMatchObject([{status:'failed',errorCode:'finish_null'}]);
+  });
+
+  it('rejects an empty decision without retrying',async()=>{
+    const {context}=fixture();const apiKey=await vault();const fetcher=vi.fn<typeof fetch>(async()=>response(''));
+    const provider=new DeepSeekDecisionProvider({vault:apiKey,settings:{realModeEnabled:()=>true},fetcher});const settled:ProviderRequestResult[]=[];
+    await expect(provider.decide(context,execution({},[],settled))).rejects.toMatchObject({code:'malformed_output'});
+    expect(fetcher).toHaveBeenCalledTimes(1);expect(settled).toMatchObject([{status:'failed',errorCode:'empty_output'}]);
+  });
+
   it('discards any provider response that echoes the configured key',async()=>{
     const {context}=fixture();const apiKey=await vault();const secret='sk-test-not-a-real-key';
     const fetcher=vi.fn<typeof fetch>(async()=>response({type:'post',title:'echo',body:secret}));const provider=new DeepSeekDecisionProvider({vault:apiKey,settings:{realModeEnabled:()=>true},fetcher});const settled:ProviderRequestResult[]=[];
