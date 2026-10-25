@@ -10,7 +10,7 @@ const databases:ReturnType<typeof openDatabase>[]=[];const engines:ExperimentEng
 afterEach(()=>{for(const engine of engines.splice(0))engine.close();for(const db of databases.splice(0))db.close();});
 async function vault(){let stored:string|null=null;const value=new CredentialVault({name:'Test protected store',available:async()=>true,read:async()=>stored,write:async(secret:string)=>{stored=secret;},remove:async()=>{stored=null;}});await value.save('sk-test-no-paid-call','protected');return value;}
 function providerWith(fetcher:typeof fetch){return vault().then(value=>new DeepSeekDecisionProvider({vault:value,settings:{realModeEnabled:()=>true},fetcher}));}
-function completion(action:unknown={type:'silence'},status=200,usage={prompt_tokens:41,completion_tokens:5}){return new Response(JSON.stringify({id:'run-request-1',choices:[{message:{content:JSON.stringify(action)},finish_reason:'stop'}],usage}),{status,headers:{'content-type':'application/json'}});}
+function completion(action:unknown={type:'silence'},status=200,usage={prompt_tokens:41,completion_tokens:5},finishReason='stop'){return new Response(JSON.stringify({id:'run-request-1',choices:[{message:{content:typeof action==='string'?action:JSON.stringify(action)},finish_reason:finishReason}],usage}),{status,headers:{'content-type':'application/json'}});}
 function setup(realProvider:DecisionProvider,limits=baseLimits,scenarioId='capture-the-flags'){
   const db=openDatabase(':memory:');databases.push(db);const engine=new ExperimentEngine(db,{autoSchedule:false,realProvider});engines.push(engine);
   const run=engine.createExperiment({scenarioId,seed:`engine-${Math.random()}`,mode:'real',provider:{provider:'deepseek',model:'deepseek-flash',limits}});
@@ -27,6 +27,57 @@ describe('real AI experiment engine path',()=>{
     expect(db.prepare('SELECT status,model_id,input_tokens,output_tokens,provider_request_id FROM provider_requests WHERE experiment_id=?').get(run.id)).toMatchObject({status:'succeeded',model_id:'deepseek-flash',input_tokens:41,output_tokens:5,provider_request_id:'run-request-1'});
     const saved=String(db.prepare('SELECT config_json FROM experiments WHERE id=?').get(run.id) as {config_json:string});expect(saved).not.toContain('sk-test-no-paid-call');
     const events=JSON.stringify(engine.getEvents(run.id));expect(events).not.toContain('sk-test-no-paid-call');
+  });
+
+  it('retries a mocked truncated response and persists only the complete decision',async()=>{
+    const fetcher=vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(completion('{"type":"post","title":"partial',200,{prompt_tokens:41,completion_tokens:128},'length'))
+      .mockResolvedValueOnce(completion({type:'silence'}));
+    const provider=await providerWith(fetcher);const {db,engine,run}=setup(provider);engine.pause(run.id);
+    const after=await engine.step(run.id);
+    expect(fetcher).toHaveBeenCalledTimes(2);expect(after).toMatchObject({status:'paused',decisionCount:1,postCount:0,providerUsage:{requests:2,inputTokens:82,outputTokens:133,model:'deepseek-flash'}});
+    expect(engine.getForumRows(run.id)).toHaveLength(0);
+    expect(db.prepare('SELECT action_type FROM agent_decisions WHERE experiment_id=?').get(run.id)).toMatchObject({action_type:'silence'});
+    expect(db.prepare('SELECT status,error_code,output_tokens FROM provider_requests WHERE experiment_id=? ORDER BY rowid').all(run.id)).toEqual([
+      {status:'failed',error_code:'finish_length',output_tokens:128},
+      {status:'succeeded',error_code:null,output_tokens:5},
+    ]);
+  });
+
+  it.each(['capture-the-flags','the-investigation'])('stops after an incomplete response when the saved request budget cannot fund a retry (%s)',async(scenarioId)=>{
+    const fetcher=vi.fn<typeof fetch>(async()=>completion('{"type":"post","title":"partial',200,{prompt_tokens:41,completion_tokens:128},'length'));
+    const provider=await providerWith(fetcher);const oneRequest={...baseLimits,maxRequests:1};const {db,engine,run}=setup(provider,oneRequest,scenarioId);engine.pause(run.id);
+    const result=await engine.step(run.id);
+    expect(fetcher).toHaveBeenCalledTimes(1);expect(result).toMatchObject({status:'failed',decisionCount:0,outcome:null});
+    expect(result.stopReason).toMatch(/usage limit/i);expect(engine.getForumRows(run.id)).toHaveLength(0);
+    expect(db.prepare('SELECT count(*) AS n FROM agent_decisions WHERE experiment_id=?').get(run.id)).toMatchObject({n:0});
+    if(scenarioId==='the-investigation')expect(engine.getInvestigationState(run.id)).toMatchObject({votes:[],opinionChanges:[],phase:'discussion'});
+    else expect(engine.getCaptureTheFlagsState(run.id)).toMatchObject({safeCount:5,capturedCount:0,transfers:[]});
+    expect(db.prepare('SELECT status,error_code,output_tokens FROM provider_requests WHERE experiment_id=? ORDER BY rowid').all(run.id)).toEqual([
+      {status:'failed',error_code:'finish_length',output_tokens:128},
+      {status:'budget_rejected',error_code:'budget_exceeded',output_tokens:null},
+    ]);
+  });
+
+  it('does not retry a truncated response after reported output usage exceeds its saved token budget',async()=>{
+    const fetcher=vi.fn<typeof fetch>(async()=>completion('{"type":"post","title":"partial',200,{prompt_tokens:41,completion_tokens:129},'length'));
+    const provider=await providerWith(fetcher);const outputCap={...baseLimits,maxOutputTokens:128};const {db,engine,run}=setup(provider,outputCap);engine.pause(run.id);
+    const result=await engine.step(run.id);
+    expect(fetcher).toHaveBeenCalledTimes(1);expect(result).toMatchObject({status:'failed',decisionCount:0,outcome:null});
+    expect(result.stopReason).toMatch(/saved local limits/i);expect(engine.getForumRows(run.id)).toHaveLength(0);
+    expect(db.prepare('SELECT status,error_code,output_tokens FROM provider_requests WHERE experiment_id=?').get(run.id)).toMatchObject({status:'failed',error_code:'finish_length',output_tokens:129});
+  });
+
+  it('charges an incomplete response to the saved spend ceiling before considering a retry',async()=>{
+    const fetcher=vi.fn<typeof fetch>(async()=>completion('{"type":"post","title":"partial',200,{prompt_tokens:2_000,completion_tokens:1_024},'length'));
+    const provider=await providerWith(fetcher);const spendCap={...baseLimits,maxOutputTokens:2_048,maxOutputTokensPerRequest:1_024,maxEstimatedUsd:0.01};
+    const {db,engine,run}=setup(provider,spendCap);engine.pause(run.id);const result=await engine.step(run.id);
+    expect(fetcher).toHaveBeenCalledTimes(1);expect(result).toMatchObject({status:'failed',decisionCount:0,outcome:null});
+    expect(result.stopReason).toMatch(/usage limit/i);expect(engine.getForumRows(run.id)).toHaveLength(0);
+    const requests=db.prepare('SELECT status,error_code,output_tokens,actual_cost_usd FROM provider_requests WHERE experiment_id=? ORDER BY rowid').all(run.id) as {status:string;error_code:string|null;output_tokens:number|null;actual_cost_usd:number|null}[];
+    expect(requests).toHaveLength(2);expect(requests[0]).toMatchObject({status:'failed',error_code:'finish_length',output_tokens:1_024});
+    expect(requests[0]!.actual_cost_usd).toBeGreaterThan(0);expect(requests[1]).toMatchObject({status:'budget_rejected',error_code:'budget_exceeded'});
+    expect(engine.getExperiment(run.id).providerUsage?.estimatedUsd).toBeLessThanOrEqual(spendCap.maxEstimatedUsd);
   });
 
   it('marks invalid scenario actions failed without applying posts, flags or votes',async()=>{

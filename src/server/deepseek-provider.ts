@@ -118,9 +118,13 @@ export class DeepSeekDecisionProvider implements DecisionProvider {
         const actualInput=usage?.prompt_tokens;const actualOutput=usage?.completion_tokens;
         const actualCost=actualInput!==undefined&&actualOutput!==undefined?estimateDeepSeekCostUsd(actualInput,actualOutput):undefined;
         const choice=envelope.data.choices[0]!;
-        if(choice.finish_reason&&choice.finish_reason!=='stop'){
-          execution.settle(reservationId,{status:'failed',requestId:responseId,inputTokens:actualInput,outputTokens:actualOutput,actualCostUsd:actualCost,errorCode:`finish_${choice.finish_reason}`,elapsedMs:this.now()-started});
-          throw new ProviderError('incomplete_output','DeepSeek did not finish a complete decision.');
+        if(choice.finish_reason!=='stop'){
+          const withinLimits=execution.settle(reservationId,{status:'failed',requestId:responseId,inputTokens:actualInput,outputTokens:actualOutput,actualCostUsd:actualCost,errorCode:`finish_${choice.finish_reason}`,elapsedMs:this.now()-started});
+          if(!withinLimits)throw new ProviderError('usage_overrun','DeepSeek-reported usage exceeded this run’s saved local limits. The partial response was discarded.');
+          if(choice.finish_reason==='length'&&attempt<MAX_ATTEMPTS){await wait(250*attempt,execution.signal);continue;}
+          throw new ProviderError('incomplete_output',choice.finish_reason==='length'
+            ?'DeepSeek did not finish a complete decision after the bounded retry; no action was accepted.'
+            :'DeepSeek did not finish a complete decision; no action was accepted.');
         }
         if(!choice.message.content){
           execution.settle(reservationId,{status:'failed',requestId:responseId,inputTokens:actualInput,outputTokens:actualOutput,actualCostUsd:actualCost,errorCode:'empty_output',elapsedMs:this.now()-started});

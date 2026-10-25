@@ -17,6 +17,7 @@ jobs:
       - run: npm run build
       - run: npx playwright install chromium
       - run: npm test
+      - run: npm run test:theme-browser
       - name: Smoke test the Windows launcher and local data recovery
         shell: pwsh
         run: |

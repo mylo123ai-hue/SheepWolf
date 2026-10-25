@@ -3,6 +3,7 @@ import { Activity, ArrowLeft, ArrowRight, BookOpen, Check, ChevronDown, Clock3, 
 import { api } from '../api';
 import type { HistoryDetail, HistorySummary, ProviderSettings } from '../api';
 import type { CaptureTheFlagsState, Character, ExperimentSnapshot, ForumPost, InvestigationState, ProviderRunLimits, ScenarioSummary } from '../../shared/types';
+import { readThemePreference, writeThemePreference } from './theme-preference';
 import './history.css';
 
 type Page = 'library' | 'forum' | 'observer' | 'history' | 'settings';
@@ -18,7 +19,7 @@ function App() {
   const [activeTab,setActiveTab]=useState<'discussion'|'activity'>('discussion');
   const [search,setSearch]=useState('');
   const [mobileMenu,setMobileMenu]=useState(false);
-  const [dark,setDark]=useState(false);
+  const [dark,setDark]=useState(()=>readThemePreference()==='dark');
   const [notice,setNotice]=useState('');
   const [run,setRun]=useState<ExperimentSnapshot|null>(null);
   const [providerSettings,setProviderSettings]=useState<ProviderSettings|null>(null);
@@ -28,6 +29,7 @@ function App() {
   const [historyError,setHistoryError]=useState('');
   const [historySelectedId,setHistorySelectedId]=useState<string|null>(null);
   const [controlBusy,setControlBusy]=useState(false);
+  useEffect(()=>{writeThemePreference(dark?'dark':'light');},[dark]);
   const scenario=scenarios.find(s=>s.id===selected);
   const participantMap=useMemo(()=>new Map(characters.map(c=>[c.id,c])),[characters]);
   useEffect(()=>{ let cancelled=false;Promise.all([api.scenarios(),api.characters(),api.currentExperiment(),api.providerSettings()]).then(([s,c,active,providers])=>{if(cancelled)return;setScenarios(s);setCharacters(c);setProviderSettings(providers);if(active){setRun(active);setSelected(active.scenarioId);if(active.status==='running'||active.status==='paused')setPage('forum');}}).catch(e=>{if(!cancelled)setError(e.message);}).finally(()=>{if(!cancelled)setLoading(false);});return()=>{cancelled=true;}; },[]);
