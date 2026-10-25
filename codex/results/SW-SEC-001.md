@@ -13,6 +13,7 @@
 - PR: [#6 — Repair npm dependency advisories](https://github.com/mylo123ai-hue/SheepWolf/pull/6), targeting `main`; open and unmerged
 - Windows CI for implementation commit: [run 40227797637](https://github.com/mylo123ai-hue/SheepWolf/actions/runs/40227797637), passed on Windows Server 2022 / Node 22.23.4
 - No source-code, CI workflow, credential, security-setting, or scenario files were changed. PR #4 was not modified.
+- The PR comparison also adds `codex/handoffs/SW-SEC-001.md`, exactly as supplied by the pinned handoff commit; that assignment file was not edited during implementation.
 
 ## Baseline findings
 
@@ -35,6 +36,7 @@ The npm audit feed supplied GHSA IDs but no CVE IDs. The production-only audit c
 | `package-lock.json` | Regenerated reproducibly from those declared versions; removed the vulnerable worker dependency and updated transitive packages. |
 | `docs/IMPLEMENTATION_PROGRESS.md` | Added verified SW-SEC-001 findings, outcome, CI evidence and remaining platform caveat. |
 | `codex/results/SW-SEC-001.md` | Published this acceptance and audit report. |
+| `codex/handoffs/SW-SEC-001.md` | Present in the PR comparison because it was added by the exact authorized handoff revision whose parent is `main`; preserved byte-for-byte and not changed by the implementation. |
 
 These are SemVer major upgrades. The fresh audit showed no fixed release in the pinned major lines; the smallest available compatible fixed lines were selected. The app's existing Fastify static registration, Zod schemas, Vitest configuration and tests passed unchanged. This is consumer compatibility evidence, not a claim that the major releases have no API changes generally.
 
